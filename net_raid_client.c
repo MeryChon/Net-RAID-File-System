@@ -4,7 +4,7 @@
 
 static void parse_client_info(char* line);
 static char* substring(char* string, int start, int end);
-static char* chop_newline(char* string);
+static char* chop_whitespaces(char* string);
 
 static void parse_client_info(char* line) {
 	const char* delims = " =";
@@ -38,21 +38,63 @@ static void parse_client_info(char* line) {
 }
 
 
+static void parse_server_info(char* line, int disk_num) {	
+	const char* delims = "=";
+	int is_value = FALSE;
+	char* key = chop_whitespaces(strtok(line, delims));
+	assert(key != NULL);
+	char* value = chop_whitespaces(strtok(NULL, delims));
+	assert(value!=NULL);
+	
+	if(strcmp(key, "diskname") == 0) {
+		raids[disk_num].diskname = malloc(MAX_DIR_NAME_LENGTH);
+		assert(raids[disk_num].diskname != NULL);
+		strcpy(raids[disk_num].diskname, value);
+	} else if(strcmp(key, "mountpoint") == 0){
+		raids[disk_num].mountpoint = malloc(MAX_DIR_NAME_LENGTH * 8);
+		assert(raids[disk_num].mountpoint != NULL);
+		strcpy(raids[disk_num].mountpoint, value);
+	} else if(strcmp(key, "raid") == 0){
+		raids[disk_num].raid = atoi(value); //should check for number
+	} else if(strcmp(key, "servers") == 0){
+		int i = 0;
+		raids[disk_num].servers = malloc(sizeof(char*) * MAX_NUM_SERVERS);
+		assert(raids[disk_num].servers != NULL);
+		char* server;
+		while((server = strtok_r(value, ", ", &value))) {
+			raids[disk_num].servers[i] = malloc(20);
+			assert(raids[disk_num].servers[i] != NULL);
+			strcpy(raids[disk_num].servers[i], server);
+			i++;
+		}
 
-static char* chop_newline(char* string) {
-	char last = string[strlen(string) - 1];
-	char* res = malloc(strlen(string)); //free
-	assert(res != NULL);
-	if(last == '\n') {
-		strncpy(res, string, strlen(string) - 1);
+	} else if(strcmp(key, "hotswap") == 0){
+		raids[disk_num].hotswap = value;
 	}
-	// printf("%d,  %d\n", strlen(string), strlen(res));
+
+}
+
+
+
+static char* chop_whitespaces(char* str) {
+	if(str == NULL)
+		return NULL;
+	int start = 0;
+	int end = strlen(str) - 1;
+	while (str[start] == ' ') {
+		start++;
+	}
+
+	while(str[end] == ' ' || str[end] == '\n') {
+		end--;
+	}
+	char* res = substring(str, start, end+1);
 	return res;
 }
 
 
 
-/* Includes both string[start] and string[end] */
+/* Includes string[start], excludes string[end] */
 static char* substring(char* string, int start, int end) {
 	char* res = malloc(strlen(string)); //free
 	int i=0;
@@ -80,12 +122,21 @@ static void parse_config_file(const char* config_file_path){
 			if(curr_bytes < 1 || strcmp(curr_line, "\n") == 0)
 				break;
 			bytes_read += curr_bytes;
-			parse_client_info(chop_newline(curr_line));
-
+			parse_client_info(chop_whitespaces(curr_line));
 		}
 
-		// fseek();
-		printf("%s  %d  %s  %d\n", client_info.errorlog_path, client_info.cache_size, client_info.cache_replacement_algorithm, client_info.timeout);
+		int server_count = 0;
+		while(1) {
+			ssize_t curr_bytes = getline(&curr_line, &n, config_file);
+			if(curr_bytes < 1 || curr_line == NULL)
+				break;
+			if(strcmp(curr_line, "\n") == 0) {
+				server_count++;
+				continue;
+			}
+			bytes_read += curr_bytes;
+			parse_server_info(chop_whitespaces(curr_line), server_count);
+		}
 
 		fclose(config_file);
 	}
@@ -95,6 +146,18 @@ static void parse_config_file(const char* config_file_path){
 
 int main(int argc, char const *argv[]) {
 	const char* config_file_path = argv[1];
+	raids = malloc(MAX_NUM_RAIDS * sizeof(struct disk_info));
+	assert(raids != NULL); 
 	parse_config_file(config_file_path);
+	
+	int i=0;
+	for(; i<3; i++) {
+		struct disk_info r = raids[i];
+		printf("diskname: %s; mountpoint: %s; raid: %d; hotswap: %s;\n", r.diskname, r.mountpoint, r.raid, r.hotswap);
+		int j=0;
+		for(; j<2; j++) {
+			printf("%s\n", r.servers[j]);
+		}
+	}
 	return 0;
 }

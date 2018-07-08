@@ -5,6 +5,9 @@
 #include <stdio.h>
 
 #define MAX_LINE_LENGTH 128
+#define MAX_NUM_SERVERS 32
+#define MAX_NUM_RAIDS 6
+#define MAX_DIR_NAME_LENGTH 32
 
 #define ERROR_LOG 0
 #define CACHE_SIZE 1
@@ -26,12 +29,12 @@ struct meta_info {
 struct disk_info {
 	char* diskname;
 	char* mountpoint;
-	size_t raid;
+	int raid;
 	char** servers;
 	char* hotswap; 
 };
 
-struct disk_info* disks;
+struct disk_info* raids;
 struct meta_info client_info;
 char* client_info_keys[] = {"errorlog", "cache_size", "cache_replacement", "timeout"};
 
