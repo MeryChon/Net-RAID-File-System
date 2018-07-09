@@ -40,8 +40,9 @@ char* client_info_keys[] = {"errorlog", "cache_size", "cache_replacement", "time
 
 
 void client_init();
-
 void client_destroy();
+
+void log_to_file(const char* log_text);
 
 
 #endif

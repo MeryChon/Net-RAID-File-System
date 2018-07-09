@@ -1,6 +1,7 @@
 #include "net_raid_client.h"
 #include <assert.h>
 #include <string.h>
+#include <time.h>
 
 static void parse_client_info(char* line);
 static char* substring(char* string, int start, int end);
@@ -150,14 +151,35 @@ int main(int argc, char const *argv[]) {
 	assert(raids != NULL); 
 	parse_config_file(config_file_path);
 	
-	int i=0;
-	for(; i<3; i++) {
-		struct disk_info r = raids[i];
-		printf("diskname: %s; mountpoint: %s; raid: %d; hotswap: %s;\n", r.diskname, r.mountpoint, r.raid, r.hotswap);
-		int j=0;
-		for(; j<2; j++) {
-			printf("%s\n", r.servers[j]);
+	// int i=0;
+	// for(; i<3; i++) {
+	// 	struct disk_info r = raids[i];
+	// 	printf("diskname: %s; mountpoint: %s; raid: %d; hotswap: %s;\n", r.diskname, r.mountpoint, r.raid, r.hotswap);
+	// 	int j=0;
+	// 	for(; j<2; j++) {
+	// 		printf("%s\n", r.servers[j]);
+	// 	}
+	// }
+	// log_to_file("bla");
+	return 0;
+}
+
+
+
+void log_to_file(const char* log_text) {
+	if(log_text != NULL){
+		printf("%s\n", client_info.errorlog_path);
+		FILE* log_file = fopen(client_info.errorlog_path, "a");
+		if(log_file) {
+			printf("%s\n", "opened the log file");
+			time_t t = time(0);
+			struct tm* tm = localtime(&t);
+			char time_string [26];
+			strftime(time_string, 26, "%Y-%m-%d %H:%M:%S", tm);
+			fprintf(log_file, "%s --- %s\n", time_string, log_text);
+			fclose(log_file);
 		}
 	}
-	return 0;
+		
+	
 }
