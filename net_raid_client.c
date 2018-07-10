@@ -1,7 +1,14 @@
+#define FUSE_USE_VERSION 26
+
 #include "net_raid_client.h"
 #include <assert.h>
 #include <string.h>
 #include <time.h>
+#include "raid1_fuse.h"
+
+
+
+
 
 static void parse_client_info(char* line);
 static char* substring(char* string, int start, int end);
@@ -9,7 +16,7 @@ static char* chop_whitespaces(char* string);
 
 static void parse_client_info(char* line) {
 	const char* delims = " =";
-	int is_value = FALSE;
+	// int is_value = FALSE;
 
 	char* key = strtok(line, delims);
 	assert(key != NULL);
@@ -41,7 +48,7 @@ static void parse_client_info(char* line) {
 
 static void parse_server_info(char* line, int disk_num) {	
 	const char* delims = "=";
-	int is_value = FALSE;
+	// int is_value = FALSE;
 	char* key = chop_whitespaces(strtok(line, delims));
 	assert(key != NULL);
 	char* value = chop_whitespaces(strtok(NULL, delims));
@@ -145,27 +152,6 @@ static void parse_config_file(const char* config_file_path){
 
 
 
-int main(int argc, char const *argv[]) {
-	const char* config_file_path = argv[1];
-	raids = malloc(MAX_NUM_RAIDS * sizeof(struct disk_info));
-	assert(raids != NULL); 
-	parse_config_file(config_file_path);
-	
-	// int i=0;
-	// for(; i<3; i++) {
-	// 	struct disk_info r = raids[i];
-	// 	printf("diskname: %s; mountpoint: %s; raid: %d; hotswap: %s;\n", r.diskname, r.mountpoint, r.raid, r.hotswap);
-	// 	int j=0;
-	// 	for(; j<2; j++) {
-	// 		printf("%s\n", r.servers[j]);
-	// 	}
-	// }
-	// log_to_file("bla");
-	return 0;
-}
-
-
-
 void log_to_file(const char* log_text) {
 	if(log_text != NULL){
 		printf("%s\n", client_info.errorlog_path);
@@ -179,7 +165,22 @@ void log_to_file(const char* log_text) {
 			fprintf(log_file, "%s --- %s\n", time_string, log_text);
 			fclose(log_file);
 		}
-	}
-		
-	
+	}	
 }
+
+
+int main(int argc, char const *argv[]) {
+	const char* config_file_path = argv[1];
+	raids = malloc(MAX_NUM_RAIDS * sizeof(struct disk_info));
+	assert(raids != NULL); 
+	parse_config_file(config_file_path); 
+	//if (configfile)
+	// char* fuse_args[2];
+	// fuse_args[0] = strdup(argv[0]);
+	// fuse_args[1] = strdup(raids[0].mountpoint);
+	return raid1_fuse_main(argv[0], raids[0].mountpoint);
+	// return fuse_main(2, fuse_args, &nrfs_operations, NULL);
+}
+
+
+
