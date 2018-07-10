@@ -152,21 +152,21 @@ static void parse_config_file(const char* config_file_path){
 
 
 
-void log_to_file(const char* log_text) {
-	if(log_text != NULL){
-		printf("%s\n", client_info.errorlog_path);
-		FILE* log_file = fopen(client_info.errorlog_path, "a");
-		if(log_file) {
-			printf("%s\n", "opened the log file");
-			time_t t = time(0);
-			struct tm* tm = localtime(&t);
-			char time_string [26];
-			strftime(time_string, 26, "%Y-%m-%d %H:%M:%S", tm);
-			fprintf(log_file, "%s --- %s\n", time_string, log_text);
-			fclose(log_file);
-		}
-	}	
-}
+// void log_to_file(const char* log_text) {
+// 	if(log_text != NULL){
+// 		printf("%s\n", client_info.errorlog_path);
+// 		FILE* log_file = fopen(client_info.errorlog_path, "a");
+// 		if(log_file) {
+// 			printf("%s\n", "opened the log file");
+// 			time_t t = time(0);
+// 			struct tm* tm = localtime(&t);
+// 			char time_string [26];
+// 			strftime(time_string, 26, "%Y-%m-%d %H:%M:%S", tm);
+// 			fprintf(log_file, "%s --- %s\n", time_string, log_text);
+// 			fclose(log_file);
+// 		}
+// 	}	
+// }
 
 
 int main(int argc, char const *argv[]) {
