@@ -2,7 +2,7 @@
 #define _RAID1_FUSE_
 
 #define FUSE_USE_VERSION 26
-#define PATH_MAX 120
+#define PATH_MAX 200
 
 #include <fuse.h>
 
