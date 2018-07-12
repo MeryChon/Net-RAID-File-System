@@ -2,7 +2,7 @@
 #define _LOG_
 
 
-char* log_file;
+char* log_file_path;
 
 int log_msg(char* msg);
 int log_error(char* error_msg);

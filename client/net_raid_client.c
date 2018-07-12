@@ -3,11 +3,8 @@
 #include "net_raid_client.h"
 #include <assert.h>
 #include <string.h>
-#include <time.h>
 #include "raid1_fuse.h"
-
-
-
+#include "log.h"
 
 
 static void parse_client_info(char* line);
@@ -24,10 +21,12 @@ static void parse_client_info(char* line) {
 	assert(value!=NULL);
 	if(strcmp(key, "errorlog") == 0) {
 
-		client_info.errorlog_path = malloc((strlen(value) + 1)*sizeof(char));
-		assert(client_info.errorlog_path!=NULL);
+		// client_info.errorlog_path = malloc((strlen(value) + 1)*sizeof(char));
+		// assert(client_info.errorlog_path!=NULL);
 		char* final_value = strtok(value, "\"");  //remove quotes
-		strcpy(client_info.errorlog_path, final_value);
+		// strcpy(client_info.errorlog_path, final_value);
+
+		client_info.errorlog_path = strdup(final_value);
 
 	} else if(strcmp(key, "cache_size") == 0) {
 
@@ -152,33 +151,16 @@ static void parse_config_file(const char* config_file_path){
 
 
 
-// void log_to_file(const char* log_text) {
-// 	if(log_text != NULL){
-// 		printf("%s\n", client_info.errorlog_path);
-// 		FILE* log_file = fopen(client_info.errorlog_path, "a");
-// 		if(log_file) {
-// 			printf("%s\n", "opened the log file");
-// 			time_t t = time(0);
-// 			struct tm* tm = localtime(&t);
-// 			char time_string [26];
-// 			strftime(time_string, 26, "%Y-%m-%d %H:%M:%S", tm);
-// 			fprintf(log_file, "%s --- %s\n", time_string, log_text);
-// 			fclose(log_file);
-// 		}
-// 	}	
-// }
-
-
 int main(int argc, char const *argv[]) {
 	const char* config_file_path = argv[1];
 	raids = malloc(MAX_NUM_RAIDS * sizeof(struct disk_info));
 	assert(raids != NULL); 
 	parse_config_file(config_file_path); 
+	set_log_file(client_info.errorlog_path);
+	log_msg("here we go...");
 	//if (configfile)
-	// char* fuse_args[2];
-	// fuse_args[0] = strdup(argv[0]);
-	// fuse_args[1] = strdup(raids[0].mountpoint);
 	return raid1_fuse_main(argv[0], raids[0].mountpoint);
+	// return 0;
 	// return fuse_main(2, fuse_args, &nrfs_operations, NULL);
 }
 
