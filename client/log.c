@@ -29,7 +29,34 @@ int log_msg(char* msg) {
 }
 
 
+int log_connection(char* address) {
+	if(address != NULL){
+		FILE* log_file = fopen(log_file_path, "a");
+		if(log_file) {
+			time_t t = time(0);
+			struct tm* tm = localtime(&t);
+			char time_string [26];
+			strftime(time_string, 26, "%Y-%m-%d %H:%M:%S", tm);
+			fprintf(log_file, "%s --- %s %s\n", time_string, "Connected to address: ", address);
+			fclose(log_file);
+		}
+	}	
+	return 0;
+}
+
+
 int log_error(char* error_msg) {
-	//get errno and so on ...
+	//TODO: get errno and so on ...
+	if(error_msg != NULL){
+		FILE* log_file = fopen(log_file_path, "a");
+		if(log_file) {
+			time_t t = time(0);
+			struct tm* tm = localtime(&t);
+			char time_string [26];
+			strftime(time_string, 26, "%Y-%m-%d %H:%M:%S", tm);
+			fprintf(log_file, "%s --- %s %s \n", time_string, "Error: ", error_msg);
+			fclose(log_file);
+		}
+	}	
 	return 0;
 }

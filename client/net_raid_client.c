@@ -1,11 +1,12 @@
 #define FUSE_USE_VERSION 26
 
 #include "net_raid_client.h"
+#include "raid1_fuse.h"
+
 #include <assert.h>
 #include <string.h>
-#include "raid1_fuse.h"
-#include "log.h"
 
+#include "log.h"
 
 static void parse_client_info(char* line);
 static char* substring(char* string, int start, int end);
@@ -13,19 +14,14 @@ static char* chop_whitespaces(char* string);
 
 static void parse_client_info(char* line) {
 	const char* delims = " =";
-	// int is_value = FALSE;
 
 	char* key = strtok(line, delims);
 	assert(key != NULL);
 	char* value = strtok(NULL, delims);
 	assert(value!=NULL);
 	if(strcmp(key, "errorlog") == 0) {
-
-		// client_info.errorlog_path = malloc((strlen(value) + 1)*sizeof(char));
-		// assert(client_info.errorlog_path!=NULL);
+		
 		char* final_value = strtok(value, "\"");  //remove quotes
-		// strcpy(client_info.errorlog_path, final_value);
-
 		client_info.errorlog_path = strdup(final_value);
 
 	} else if(strcmp(key, "cache_size") == 0) {
@@ -45,7 +41,7 @@ static void parse_client_info(char* line) {
 }
 
 
-static void parse_server_info(char* line, int disk_num) {	
+static void parse_storage_info(char* line, int disk_num) {	
 	const char* delims = "=";
 	// int is_value = FALSE;
 	char* key = chop_whitespaces(strtok(line, delims));
@@ -74,6 +70,7 @@ static void parse_server_info(char* line, int disk_num) {
 			strcpy(raids[disk_num].servers[i], server);
 			i++;
 		}
+		raids[disk_num].num_servers = i;
 
 	} else if(strcmp(key, "hotswap") == 0){
 		raids[disk_num].hotswap = value;
@@ -142,7 +139,8 @@ static void parse_config_file(const char* config_file_path){
 				continue;
 			}
 			bytes_read += curr_bytes;
-			parse_server_info(chop_whitespaces(curr_line), server_count);
+			parse_storage_info(chop_whitespaces(curr_line), server_count);
+			num_storages++;
 		}
 
 		fclose(config_file);
@@ -150,18 +148,28 @@ static void parse_config_file(const char* config_file_path){
 }
 
 
+static int  start(const char* program_name) {
+	int i = 0;
+	for(; i<num_storages; i++) {
+		struct disk_info storage_info = raids[i];
+		if(storage_info.raid == RAID_1) {
+			return raid1_fuse_main(program_name, storage_info);
+		}
+
+	}
+	return 0;
+}
+
 
 int main(int argc, char const *argv[]) {
 	const char* config_file_path = argv[1];
 	raids = malloc(MAX_NUM_RAIDS * sizeof(struct disk_info));
 	assert(raids != NULL); 
 	parse_config_file(config_file_path); 
-	set_log_file(client_info.errorlog_path);
-	log_msg("here we go...");
 	//if (configfile)
-	return raid1_fuse_main(argv[0], raids[0].mountpoint);
-	// return 0;
-	// return fuse_main(2, fuse_args, &nrfs_operations, NULL);
+	set_log_file(client_info.errorlog_path);
+	return start(argv[0]);	
+	// return raid1_fuse_main(argv[0], raids[0].mountpoint);
 }
 
 

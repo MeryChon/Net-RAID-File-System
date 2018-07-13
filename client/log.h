@@ -5,6 +5,7 @@
 char* log_file_path;
 
 int log_msg(char* msg);
+int log_connection(char* address);
 int log_error(char* error_msg);
 void set_log_file(char* file_path);
 

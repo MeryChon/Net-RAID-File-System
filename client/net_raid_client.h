@@ -4,6 +4,9 @@
 #include <stdlib.h>
 #include <stdio.h>
 
+#define RAID_1 1
+#define RAID_5 5
+
 #define MAX_LINE_LENGTH 128
 #define MAX_NUM_SERVERS 32
 #define MAX_NUM_RAIDS 6
@@ -19,22 +22,10 @@
 
 
 
-struct meta_info {
-	char* errorlog_path;
-	int cache_size; // in MB
-	char* cache_replacement_algorithm; //only implementing rlu
-	int timeout; // in ms?
-};
-
-struct disk_info {
-	char* diskname;
-	char* mountpoint;
-	int raid;
-	char** servers;
-	char* hotswap; 
-};
+#include "structs.h"
 
 struct disk_info* raids;
+int num_storages = 0;
 struct meta_info client_info;
 char* client_info_keys[] = {"errorlog", "cache_size", "cache_replacement", "timeout"};
 
