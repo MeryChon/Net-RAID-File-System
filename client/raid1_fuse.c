@@ -7,11 +7,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <stdio.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <netinet/ip.h>
-#include <arpa/inet.h>
+
 #include "log.h"
 
 
@@ -26,9 +22,6 @@ static int raid1_create(const char *path, mode_t mode, struct fuse_file_info *fi
 static int raid1_mkdir(const char* path, mode_t mode);
 static int raid1_rmdir(const char* path);
 
-
-// static const char *hello_str = "Hello World!\n";
-// static const char *hello_path = "/hello";
 
 
 struct fuse_operations raid1_operations = {
@@ -65,22 +58,38 @@ static void fullpath(char fpath[PATH_MAX], const char *path)
 
 static int raid1_getattr(const char *path, struct stat *stbuf) {
 	// (void) fi;
-	int res;
+	// int res;
 
-	res = lstat(path, stbuf);
-	if (res == -1)
-		return -errno;
+	// res = lstat(path, stbuf);
+	// if (res == -1)
+	// 	return -errno;
+	if(write(socket_fd, "getattr", 7) < 0) {
+		printf("%s\n", "Gotta retry");
+	}
+	char buf[1024];
+	if(read(socket_fd, &buf, 30) < 0) {
+		printf("%s\n", "no reply from server yet");
+	}
+	printf("Received from server %s\n", buf);
 
 	return 0;
 }
 
 
 static int raid1_opendir (const char* path, struct fuse_file_info* fi) {
-	int res = open(path, fi->flags);
-	if (res == -1)
-		return -errno;
+	// int res = open(path, fi->flags);
+	// if (res == -1)
+	// 	return -errno;
 
-	fi->fh = res;
+	// fi->fh = res;
+	if(write(socket_fd, "opendir", 7) < 0) {
+		printf("%s\n", "Gotta retry");
+	}
+	char buffer[1024];
+	if(read(socket_fd, &buffer, 30) < 0) {
+		printf("%s\n", "no reply from server yet");
+	}
+	printf("Received from server %s\n", buffer);
 	return 0;
 }
 
@@ -88,26 +97,34 @@ static int raid1_opendir (const char* path, struct fuse_file_info* fi) {
 static int raid1_readdir(const char *path, void *buf, fuse_fill_dir_t filler, 
 		off_t offset, struct fuse_file_info *fi) 
 {
-	DIR *dp;
-	struct dirent *de;
+	// DIR *dp;
+	// struct dirent *de;
 
-	(void) offset;
-	(void) fi;
+	// (void) offset;
+	// (void) fi;
 
-	char fpath[PATH_MAX];
-	fullpath(fpath, path);
+	// char fpath[PATH_MAX];
+	// fullpath(fpath, path);
 
-	dp = opendir(path);
-	if (dp == NULL)
-		return -errno;
+	// dp = opendir(path);
+	// if (dp == NULL)
+	// 	return -errno;
 
-	while ((de = readdir(dp)) != NULL) {
-		log_msg(de->d_name);
-		if (filler(buf, de->d_name, NULL, 0))
-			break;
+	// while ((de = readdir(dp)) != NULL) {
+	// 	log_msg(de->d_name);
+	// 	if (filler(buf, de->d_name, NULL, 0))
+	// 		break;
+	// }
+
+	// closedir(dp);
+	if(write(socket_fd, "readdir", 7) < 0) {
+		printf("%s\n", "Gotta retry");
 	}
-
-	closedir(dp);
+	char buffer[1024];
+	if(read(socket_fd, &buffer, 30) < 0) {
+		printf("%s\n", "no reply from server yet");
+	}
+	printf("Received from server %s\n", buffer);
 	return 0;
 }
 
@@ -194,12 +211,59 @@ static int split_address(const char* address, int* ip, int* port) {
 }
 
 
-int raid1_fuse_main(const char* process_name, struct disk_info storage_info) {
+static int create_socket_connection(char* address_str, int timeout, int* socket_fd, 
+																struct sockaddr_in* server_address) {
+	int ip, port;
+	
+	*socket_fd = socket(AF_INET, SOCK_STREAM, 0);
+	if(*socket_fd < 0) {
+		log_error("Couldn't acquire endpoint file descriptor");
+		return -1;
+	}
+
+	if(split_address(address_str, &ip, &port) < 0){
+		log_error("Malformed server address");
+		return -1; //special error code?
+	}
+
+	server_address->sin_family = AF_INET;
+	server_address->sin_port = htons(port);
+	server_address->sin_addr.s_addr = ip;
+
+	int conn_status = -1;
+	time_t start = time(NULL);
+	
+	printf("%d\n", timeout);
+	
+	while(conn_status < 0 && (difftime(time(NULL), start) <= timeout)) {
+		log_msg("Trying to connect to server");
+		printf("%s\n", "Trying to connect to server");
+		conn_status = connect(*socket_fd, (struct sockaddr*)server_address, sizeof(*server_address));
+		if(conn_status < 0) {
+			sleep(2);
+		}
+	}
+
+	if(conn_status < 0) {
+		log_error("Couldn't connect to server");
+		printf("%s %s\n", "Couldn't connect to server ", address_str);
+		//do hot swap
+		return -1;
+	}
+	printf("%s %s\n", "Connected to", address_str);
+	log_connection(address_str);
+
+	return 0;
+}
+
+
+int raid1_fuse_main(const char* process_name, struct meta_info client_info,
+																	 struct disk_info storage_info) {
 	raid1_root = strdup(storage_info.mountpoint);
 	int i = 0;
 	for(;i < storage_info.num_servers; i++) {
 		//create sockets (for each remote server)
-		int network_socket = socket(AF_INET, SOCK_STREAM, 0);
+		/*int network_socket = socket(AF_INET, SOCK_STREAM, 0);
 		int ip;
 		int port;
 		split_address(storage_info.servers[i], &ip, &port);
@@ -210,30 +274,39 @@ int raid1_fuse_main(const char* process_name, struct disk_info storage_info) {
 		server_address.sin_port = htons(port); //need to extract port from passed server address
 		server_address.sin_addr.s_addr = ip;
 
-		int conn_status = connect(network_socket, (struct sockaddr*)&server_address, sizeof(server_address));
-		if(conn_status == -1) {
-			printf("%s\n", "Couldn't connect");
-			log_error("Cound not connect");		
-			//try again	
+		int conn_status = -1;//connect(network_socket, (struct sockaddr*)&server_address, sizeof(server_address));
+		time_t now = time();
+		time_t max_time = now + client_info.timeout;
+		while(conn_status < 0 && time < max_time) {
+			log_msg("Trying to connect to server");
+			conn_status = connect(network_socket, (struct sockaddr*)&server_address, sizeof(server_address));
+			if(conn_status < 0) sleep(800);
+		}
+		if(conn_status < 0) {
+			log_error("Couldn't connect to server");
+			printf("%s %s\n", "Couldn't connect to server", storage_info.servers[i]);
+			//do hot swap
+			continue;
 		} else {
 			printf("%s\n", "Connected");
 			log_connection(storage_info.servers[i]);
-			write(network_socket, "hello!", 6);
-			char buf[1024];
-			read(network_socket, &buf, 6);
-			printf("Received from server %s\n", buf);
-    		sleep(600);
-    		close(network_socket);
-		}	
-
-
+			// write(network_socket, "hello!", 6);
+			// char buf[1024];
+			// read(network_socket, &buf, 6);
+   //  		sleep(600);
+   //  		close(network_socket);
+		}	*/
+		
+		if(create_socket_connection(storage_info.servers[i], client_info.timeout, &socket_fd, &server_addr) != 0) {
+			printf("%s\n", "Need hot swap");
+		}
 	}
 	char* fuse_args[3];
 	fuse_args[0] = strdup(process_name);
 	fuse_args[1] = strdup("-f");
 	fuse_args[2] = strdup(raid1_root);
 
-	return 0;
+	// return 0;
 	
-	// return fuse_main(3, fuse_args, &raid1_operations, NULL);
+	return fuse_main(3, fuse_args, &raid1_operations, NULL);
 }

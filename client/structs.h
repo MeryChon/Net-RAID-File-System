@@ -5,8 +5,8 @@
 struct meta_info {
 	char* errorlog_path;
 	int cache_size; // in MB
-	char* cache_replacement_algorithm; //only implementing rlu
-	int timeout; // in ms?
+	char* cache_replacement_algorithm; //only implementing lru
+	int timeout; // in s?
 };
 
 struct disk_info {
@@ -17,5 +17,7 @@ struct disk_info {
 	int num_servers;
 	char* hotswap; 
 };
+
+
 
 #endif

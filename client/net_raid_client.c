@@ -153,9 +153,8 @@ static int  start(const char* program_name) {
 	for(; i<num_storages; i++) {
 		struct disk_info storage_info = raids[i];
 		if(storage_info.raid == RAID_1) {
-			return raid1_fuse_main(program_name, storage_info);
+			return raid1_fuse_main(program_name, client_info, storage_info);
 		}
-
 	}
 	return 0;
 }

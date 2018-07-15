@@ -1,3 +1,4 @@
+#include "server.h"
 #include <stdlib.h>
 #include <errno.h>
 #include <unistd.h>
@@ -12,7 +13,7 @@
 #define BACKLOG 10
 
 
-void client_handler(int cfd) {
+static void client_handler(int cfd) {
     char buf[1024];
     int data_size;
     while (1) {
@@ -20,6 +21,7 @@ void client_handler(int cfd) {
         if (data_size <= 0)
             break;
         printf("Received from client: %s\n", buf);
+        if(strcmp(buf, get))
         write (cfd, &buf, data_size);
     }
     close(cfd);
@@ -35,7 +37,7 @@ int main(int argc, char const *argv[])
 	}
 	char* ip_str = strdup(argv[1]);
 	char* port_str = strdup(argv[2]);
-	char* mountpoint = strdup(argv[3]);
+	mountpoint = strdup(argv[3]);
 
 	int sockfd, cfd;
 	sockfd = socket(AF_INET, SOCK_STREAM, 0);
@@ -45,9 +47,8 @@ int main(int argc, char const *argv[])
 	port = atoi(port_str);
 	//specify address and port
 	struct sockaddr_in addr, peer_addr;
-	// struct sockaddr_in peer_addr;
 	addr.sin_family = AF_INET;
-	addr.sin_port = htons(port); //need to extract port from passed server address
+	addr.sin_port = htons(port);
 	addr.sin_addr.s_addr = htonl(INADDR_ANY);
 
 	bind(sockfd, (struct sockaddr *) &addr, sizeof(struct sockaddr_in));
