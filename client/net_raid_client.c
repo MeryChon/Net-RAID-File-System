@@ -16,9 +16,11 @@ static void parse_client_info(char* line) {
 	const char* delims = " =";
 
 	char* key = strtok(line, delims);
+
 	assert(key != NULL);
 	char* value = strtok(NULL, delims);
 	assert(value!=NULL);
+
 	if(strcmp(key, "errorlog") == 0) {
 		
 		char* final_value = strtok(value, "\"");  //remove quotes
@@ -89,7 +91,7 @@ static char* chop_whitespaces(char* str) {
 		start++;
 	}
 
-	while(str[end] == ' ' || str[end] == '\n') {
+	while(str[end] == ' ' || str[end] == '\n' || str[end] == '\r' || str[end] == '\t') {
 		end--;
 	}
 	char* res = substring(str, start, end+1);
@@ -123,7 +125,7 @@ static void parse_config_file(const char* config_file_path){
 		ssize_t bytes_read = 0;
 		while(1) {
 			ssize_t curr_bytes = getline(&curr_line, &n, config_file);
-			if(curr_bytes < 1 || strcmp(curr_line, "\n") == 0)
+			if(curr_bytes < 1 || strcmp(curr_line, "\r\n") == 0 || strcmp(curr_line, "\n") == 0)
 				break;
 			bytes_read += curr_bytes;
 			parse_client_info(chop_whitespaces(curr_line));

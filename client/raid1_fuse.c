@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <stdio.h>
+#include <assert.h>
 
 #include "log.h"
 
@@ -41,55 +42,57 @@ struct fuse_operations raid1_operations = {
 };
 
 
-
-static void fullpath(char fpath[PATH_MAX], const char *path)
-{
-    strcpy(fpath, raid1_root);
-    if(raid1_root[strlen(raid1_root) - 1] != '/' && path[0] != '/')
-    	strncat(fpath, "/", PATH_MAX);
-    if(raid1_root[strlen(raid1_root) - 1] == '/' && path[0] == '/') {
-        strncat(fpath, path+1, PATH_MAX); // ridiculously long paths will break here
-    } else {
-    	strncat(fpath, path, PATH_MAX); // ridiculously long paths will break here
-    }
-    log_msg(fpath);
+static void print_stat(struct stat* stbuf) {
+    printf("st_dev %lu; st_ino %lu; st_mode %lu; st_uid %lu; st_gid %lu \n; st_rdev %lu; st_size %lu; st_atime %lu; st_mtime %lu; st_ctime %lu; st_blksize %lu; st_blocks %lu;\n", 
+            (size_t)stbuf->st_dev, (size_t)stbuf->st_ino, (size_t)stbuf->st_mode, (size_t)stbuf->st_uid, 
+            (size_t)stbuf->st_gid, (size_t)stbuf->st_rdev, (size_t)stbuf->st_size, (size_t)stbuf->st_atime, 
+            (size_t)stbuf->st_mtime, (size_t)stbuf->st_ctime, (size_t)stbuf->st_blksize, (size_t)stbuf->st_blocks);
 }
 
 
-static int raid1_getattr(const char *path, struct stat *stbuf) {
-	// (void) fi;
-	// int res;
 
-	// res = lstat(path, stbuf);
-	// if (res == -1)
-	// 	return -errno;
-	if(write(socket_fd, "getattr", 7) < 0) {
+static int raid1_getattr(const char *path, struct stat *stbuf) {
+	char* msg = malloc(9 + strlen(path)); //getattr  + ; + path + \0
+	assert(msg != NULL);
+
+	sprintf(msg, "%s%s", "getattr;", path);
+	if(write(socket_fd, msg, strlen(msg)+1) < 0) {
 		printf("%s\n", "Gotta retry");
 	}
-	char buf[1024];
-	if(read(socket_fd, &buf, 30) < 0) {
-		printf("%s\n", "no reply from server yet");
-	}
-	printf("Received from server %s\n", buf);
 
-	return 0;
+	//Get int indicating success or failure of getattr (stat syscall)
+	int resp_raw;
+	if(read(socket_fd, &resp_raw, sizeof(int)) < 0) {
+		printf("%s\n", "Couldn't receive status code");
+	}
+	int resp = ntohl(resp_raw);
+	printf("returned %d converted to %d.\n", resp_raw, resp);
+
+	//Going to receive stat structure now
+	int bytes_read = read(socket_fd, stbuf, sizeof(struct stat));
+	if(bytes_read < 0) {
+		printf("%s\n", "Couldn't receive struct stat");
+	}
+
+	print_stat(stbuf);
+
+	return -resp;
 }
 
 
 static int raid1_opendir (const char* path, struct fuse_file_info* fi) {
-	// int res = open(path, fi->flags);
-	// if (res == -1)
-	// 	return -errno;
-
-	// fi->fh = res;
-	if(write(socket_fd, "opendir", 7) < 0) {
-		printf("%s\n", "Gotta retry");
-	}
-	char buffer[1024];
-	if(read(socket_fd, &buffer, 30) < 0) {
-		printf("%s\n", "no reply from server yet");
-	}
-	printf("Received from server %s\n", buffer);
+	// char* msg = malloc(7 + strlen(path) + 2); //opendir  + ; + path + \0
+	// assert(msg != NULL);
+	// sprintf(msg, "%s%s", "opendir;", path);
+	// printf("%s\n", msg);
+	// if(write(socket_fd, msg, strlen(msg)) < 0) {
+	// 	printf("%s\n", "Gotta retry");
+	// }
+	// char buffer[1024];
+	// if(read(socket_fd, &buffer, 30) < 0) {
+	// 	printf("%s\n", "no reply from server yet");
+	// }
+	// printf("Received from server %s\n", buffer);
 	return 0;
 }
 
@@ -97,34 +100,14 @@ static int raid1_opendir (const char* path, struct fuse_file_info* fi) {
 static int raid1_readdir(const char *path, void *buf, fuse_fill_dir_t filler, 
 		off_t offset, struct fuse_file_info *fi) 
 {
-	// DIR *dp;
-	// struct dirent *de;
-
-	// (void) offset;
-	// (void) fi;
-
-	// char fpath[PATH_MAX];
-	// fullpath(fpath, path);
-
-	// dp = opendir(path);
-	// if (dp == NULL)
-	// 	return -errno;
-
-	// while ((de = readdir(dp)) != NULL) {
-	// 	log_msg(de->d_name);
-	// 	if (filler(buf, de->d_name, NULL, 0))
-	// 		break;
+	// if(write(socket_fd, "readdir", 7) < 0) {
+	// 	printf("%s\n", "Gotta retry");
 	// }
-
-	// closedir(dp);
-	if(write(socket_fd, "readdir", 7) < 0) {
-		printf("%s\n", "Gotta retry");
-	}
-	char buffer[1024];
-	if(read(socket_fd, &buffer, 30) < 0) {
-		printf("%s\n", "no reply from server yet");
-	}
-	printf("Received from server %s\n", buffer);
+	// char buffer[1024];
+	// if(read(socket_fd, &buffer, 30) < 0) {
+	// 	printf("%s\n", "no reply from server yet");
+	// }
+	// printf("Received from server %s\n", buffer);
 	return 0;
 }
 
@@ -166,10 +149,10 @@ static int raid1_create(const char *path, mode_t mode, struct fuse_file_info *fi
 
 
 static int raid1_open(const char *path, struct fuse_file_info *fi) {
-	uint64_t fd = (uint64_t) open(path, fi->flags);
-	fi->fh = fd;
-	if (fd < 0)
-		return -1;
+	// uint64_t fd = (uint64_t) open(path, fi->flags);
+	// fi->fh = fd;
+	// if (fd < 0)
+	// 	return -1;
 	return 0;
 }
 
@@ -211,12 +194,13 @@ static int split_address(const char* address, int* ip, int* port) {
 }
 
 
-static int create_socket_connection(char* address_str, int timeout, int* socket_fd, 
+static int create_socket_connection(char* address_str, int timeout, int* sfd_ptr, 
 																struct sockaddr_in* server_address) {
 	int ip, port;
+	(void) sfd_ptr;
 	
-	*socket_fd = socket(AF_INET, SOCK_STREAM, 0);
-	if(*socket_fd < 0) {
+	socket_fd = socket(AF_INET, SOCK_STREAM, 0);
+	if(socket_fd < 0) {
 		log_error("Couldn't acquire endpoint file descriptor");
 		return -1;
 	}
@@ -238,7 +222,7 @@ static int create_socket_connection(char* address_str, int timeout, int* socket_
 	while(conn_status < 0 && (difftime(time(NULL), start) <= timeout)) {
 		log_msg("Trying to connect to server");
 		printf("%s\n", "Trying to connect to server");
-		conn_status = connect(*socket_fd, (struct sockaddr*)server_address, sizeof(*server_address));
+		conn_status = connect(socket_fd, (struct sockaddr*)server_address, sizeof(*server_address));
 		if(conn_status < 0) {
 			sleep(2);
 		}
@@ -262,51 +246,15 @@ int raid1_fuse_main(const char* process_name, struct meta_info client_info,
 	raid1_root = strdup(storage_info.mountpoint);
 	int i = 0;
 	for(;i < storage_info.num_servers; i++) {
-		//create sockets (for each remote server)
-		/*int network_socket = socket(AF_INET, SOCK_STREAM, 0);
-		int ip;
-		int port;
-		split_address(storage_info.servers[i], &ip, &port);
-
-		//specify address and port
-		struct sockaddr_in server_address;
-		server_address.sin_family = AF_INET;
-		server_address.sin_port = htons(port); //need to extract port from passed server address
-		server_address.sin_addr.s_addr = ip;
-
-		int conn_status = -1;//connect(network_socket, (struct sockaddr*)&server_address, sizeof(server_address));
-		time_t now = time();
-		time_t max_time = now + client_info.timeout;
-		while(conn_status < 0 && time < max_time) {
-			log_msg("Trying to connect to server");
-			conn_status = connect(network_socket, (struct sockaddr*)&server_address, sizeof(server_address));
-			if(conn_status < 0) sleep(800);
-		}
-		if(conn_status < 0) {
-			log_error("Couldn't connect to server");
-			printf("%s %s\n", "Couldn't connect to server", storage_info.servers[i]);
-			//do hot swap
-			continue;
-		} else {
-			printf("%s\n", "Connected");
-			log_connection(storage_info.servers[i]);
-			// write(network_socket, "hello!", 6);
-			// char buf[1024];
-			// read(network_socket, &buf, 6);
-   //  		sleep(600);
-   //  		close(network_socket);
-		}	*/
-		
 		if(create_socket_connection(storage_info.servers[i], client_info.timeout, &socket_fd, &server_addr) != 0) {
 			printf("%s\n", "Need hot swap");
 		}
 	}
+	printf("%d\n", socket_fd);
 	char* fuse_args[3];
 	fuse_args[0] = strdup(process_name);
 	fuse_args[1] = strdup("-f");
 	fuse_args[2] = strdup(raid1_root);
 
-	// return 0;
-	
 	return fuse_main(3, fuse_args, &raid1_operations, NULL);
 }
