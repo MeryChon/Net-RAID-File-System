@@ -8,7 +8,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
-// #include "../utils/communication_structs.h"
+#include "../utils/communication_structs.h"
 #include <netinet/in.h>
 #include <netinet/ip.h>
 #include <arpa/inet.h>
@@ -48,6 +48,10 @@ static int read_from_buffer(int cfd, char buf[], int length) {
     while (1) {
         data_size = read (cfd, buf, length);
         printf("%s %d\n", buf, data_size);
+        if(data_size < 0) {
+            printf("read_from_buffer : %s\n", strerror(errno));
+            return -errno;
+        }
         int exit = 0;
         int i=0;
         for(; i<length; i++) {
@@ -66,12 +70,13 @@ static int read_from_buffer(int cfd, char buf[], int length) {
 }
 
 
-static int getattr_handler(int cfd) {
-    char* path = strtok(NULL, ";"); //might need to use strtok_r and pass string to tokenize as an argument
+static int getattr_handler(int cfd, char* parameters) {
+    char* path = strtok_r(parameters, ";", &parameters); //might need to use strtok_r and pass string to tokenize as an argument
     assert(path != NULL);
     
     char fpath[MAX_PATH_LENGTH];
     fullpath(fpath, path);
+    printf("Full path is %s\n", fpath);
 
     struct stat* stbuf = malloc(sizeof(struct stat));
     assert(stbuf != NULL);
@@ -97,17 +102,18 @@ static int getattr_handler(int cfd) {
 }
 
 
-static int opendir_handler(int cfd) {
-    char* path = strtok(NULL, ";"); //might need to use strtok_r and pass string to tokenize as an argument
+static int opendir_handler(int cfd, char* parameters) {
+    char* path = strtok_r(parameters, ";", &parameters); //might need to use strtok_r and pass string to tokenize as an argument
     assert(path != NULL);
     
     char fpath[MAX_PATH_LENGTH];
     fullpath(fpath, path);
-    printf("%s\n", fpath);
+    printf("Full path is %s\n", fpath);
 
-    char* flags_str = strtok(NULL, ";");
+    char* flags_str = strtok_r(parameters, ";", &parameters);
     assert(flags_str != NULL);
     int flags = atoi(flags_str); //check?
+    printf("Flags are %d\n", flags);
 
     int fd = open(path, flags);
     int ret_val = 0;
@@ -127,20 +133,21 @@ static int opendir_handler(int cfd) {
 
 
 
-static int readdir_handler(int cfd) {
-    char* path = strtok(NULL, ";"); //might need to use strtok_r and pass string to tokenize as an argument
+static int readdir_handler(int cfd, char* parameters) {
+    char* path = strtok_r(parameters, ";", &parameters); //might need to use strtok_r and pass string to tokenize as an argument
     assert(path != NULL);    
     char fpath[MAX_PATH_LENGTH];
     fullpath(fpath, path);
-    printf("%s\n", fpath);
+    printf("Full path is %s\n", fpath);
 
-    char* offset_str = strtok(NULL, ";");
+    /*char* offset_str = strtok(NULL, ";");
+    char err_resp[100];
     if(offset_str == NULL) {
-        char err_resp[100] = "-1;Malformed message";
+        strcpy(err_resp, "-1;Malformed message");
         write(cfd, &err_resp, strlen(err_resp) + 1);
         return -1;
     }
-    int offset = atoi(offset_str);
+    int offset = atoi(offset_str); */
 
     DIR *dp;
     struct dirent *de;
@@ -148,59 +155,137 @@ static int readdir_handler(int cfd) {
     dp = opendir(fpath);
     int opendir_status = 0;
     if (dp == NULL) {
-        // char err_resp[100]; 
-        // sprintf(err_resp, "%d;%s", errno, "Error on opendir");
         opendir_status = errno;
-        printf("READDIR_HANDLER: error %d\n", err_resp);
-        write(cfd, &err_resp, strlen(err_resp));
-        return -errno;
+        printf("READDIR_HANDLER: error %s\n", strerror(errno));
     }
 
+    // uint32_t status_resp = htonl(opendir_status);
+    char status_resp [12];
+    sprintf(status_resp, "%d",  opendir_status);
+    printf("READDIR_HANDLER: Sending status %s \n", status_resp);
+    if(write(cfd, status_resp, strlen(status_resp)) < 0) {
+        printf("READDIR_HANDLER: after opendir %s\n", strerror(errno));
+    }
+    if(opendir_status != 0)
+        return -errno;
+
+    // struct readdir_resp response;
+    char has_next [2];
+    strcpy(has_next, "1");
     while ((de = readdir(dp)) != NULL) {
-        struct stat st;
+        printf("has_next = %s\n", has_next);
+        if(write(cfd, has_next, strlen(has_next)) < 0){
+            printf("Couldn't send has_next: %s\n", strerror(errno));
+        }
+
+        if(write(cfd, de, sizeof(struct dirent)) < 0) {
+            printf("Couldn't send current dirent: %s\n", strerror(errno));
+            closedir(dp);
+            return -errno;
+        } 
+        /*struct stat st;
         memset(&st, 0, sizeof(st));
         st.st_ino = de->d_ino;
         st.st_mode = de->d_type << 12;
         printf("st.st_ino = %lu;  st.st_mode = %d;  de->d_type = %d; de_.de_name = %s\n", 
                                         (size_t)st.st_ino, st.st_mode, de->d_type, de->d_name);
+        */
+
         
-        if(write(cfd, de->d_name, strlen(de->d_name) + 1) < 0) {
-            printf("%s\n", "READDIR_HANDLER: Couldn't send de->dname");
-            return -errno; //TODO: something else
-        }
+        // response.status = 0;
+        // strcpy(response.dir_name, de->d_name);
+        // response.st = st;
+        /*if(write(cfd, &response, sizeof(response)) < 0) {
+            printf("%s\n", "READDIR_HANDLER: Couldn't send reponse");
+            closedir(dp);
+            return -errno;
+        } */
 
-        if(write(cfd, &st, sizeof(st)) < 0) {
-            printf("%s\n", "READDIR_HANDLER: Couldn't send struct stat");
-            return -errno; //TODO: something else
-        }
+        // if(write(cfd, de->d_name, strlen(de->d_name) + 1) < 0) {
+        //     printf("%s\n", "READDIR_HANDLER: Couldn't send de->dname");
+        //     return -errno; //TODO: something else
+        // }
+
+        // if(write(cfd, &st, sizeof(st)) < 0) {
+        //     printf("%s\n", "READDIR_HANDLER: Couldn't send struct stat");
+        //     return -errno; //TODO: something else
+        // }
+    }
+    strcpy(has_next, "0");
+    printf("has_next = %s\n", has_next);
+    if(write(cfd, has_next, strlen(has_next)) < 0){
+        printf("Couldn't send has_next: %s\n", strerror(errno));
     }
 
-    if(write(cfd, "/", 2) < 0) { // sending "/" indicates that reading the directory is over 
-        printf("%s\n", "READDIR_HANDLER: Couldn't send end of dir indicator '/'");
-        return -errno; //TODO: something else
-    }
+    // response.status = 1;
+    //strcpy(response.dir_name, "/");
+
+    // if(write(cfd, &response, sizeof(response)) < 0) { // sending status code 1 indicates that reading the directory is over 
+    //     printf("%s\n", "READDIR_HANDLER: Couldn't send end of dir indicator");
+    //     closedir(dp);
+    //     return -errno; //TODO: something else
+    // }
 
     closedir(dp);
+    return 0;
 }
+
+
+static int access_handler(int cfd, char* parameters) {
+    char* path = strtok_r(parameters, ";", &parameters); //might need to use strtok_r and pass string to tokenize as an argument
+    assert(path != NULL);    
+    char fpath[MAX_PATH_LENGTH];
+    fullpath(fpath, path);
+    printf("Full path is %s\n", fpath);
+
+    char* mask_str = strtok_r(parameters, ";", &parameters);
+    int mask = atoi(mask_str);
+    printf("Mask is %d\n", mask);
+
+    int res = access(path, mask);
+    int ret_val = 0;
+    if(res == -1) {
+        ret_val = errno;
+        printf("ACCESS HANDLER: %s\n", strerror(errno));
+    }
+    // ret_val = 0;
+
+    char retval_str[12];
+    sprintf(retval_str, "%d", ret_val);
+    if(write(cfd, retval_str, strlen(retval_str) + 1) < 0) {
+        printf("%s\n", "Couldn't send response to client");
+    }
+    return ret_val;
+}
+
 
 
 static void client_handler(int cfd) {
     char msg[MAX_CLIENT_MSG_LENGTH];
     while(1) {
         printf("%s\n", "---------Inside client handler. Waiting for message from the client...--------");
-        read_from_buffer(cfd, msg, MAX_CLIENT_MSG_LENGTH);
+        int bytes_read = read_from_buffer(cfd, msg, MAX_CLIENT_MSG_LENGTH);
+        if(bytes_read < 0) {
+            // char err_resp [12];
+            // sprintf(err_resp, "%d;", errno);
+            // write(cfd, &err_resp, sizeof(err_resp));
+            break;
+        }
         printf("%s\n",msg);
-        char* syscall = strtok(msg, ";");
+        char* rest = msg;
+        char* syscall = strtok_r(msg, ";", &rest);
         assert(syscall != NULL); //When client dies, some message is sent on socket close(?) and assertion fails
         printf("Received syscall %s\n", syscall);
         if(syscall == NULL || strcmp(syscall, "0") == 0) {
             break;
         } else if(strcmp(syscall, "getattr") == 0) {
-            getattr_handler(cfd);
+            getattr_handler(cfd, rest);
         } else if(strcmp(syscall, "opendir") == 0) {
-            opendir_handler(cfd);
+            opendir_handler(cfd, rest);
         } else if(strcmp(syscall, "readdir") == 0) {
-            readdir_handler(cfd);
+            readdir_handler(cfd, rest);
+        } else if(strcmp(syscall, "access") == 0) {
+            access_handler(cfd, rest);
         }
     }
     close(cfd);
