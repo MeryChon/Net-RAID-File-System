@@ -86,20 +86,39 @@ static int raid1_getattr(const char *path, struct stat *stbuf) {
 
 static int raid1_opendir (const char* path, struct fuse_file_info* fi) {
 	printf("%s\n", "SYSCALL OPENDIR");
-	return 0;
-	// char* msg = malloc(21 + strlen(path)); //opendir  + ; + path + ; + flags + \0
-	// assert(msg != NULL);
+	char* msg = malloc(10 + strlen(path)); //opendir  + ; + path + \0
+	assert(msg != NULL);
 	
-	// printf("flags are %d \n", fi->flags);
+	sprintf(msg, "opendir;%s", path);
+	printf("Sending to server %s\n", msg);
+	int bytes_sent;
+	if((bytes_sent = write(socket_fd, msg, strlen(msg) + 1)) < 0) {
+		printf("%s\n", "Gotta retry");
+	}
+	printf("OPENDIR: Sent to server %s; total %d bytes\n", msg, bytes_sent);
+	free(msg);
 
-	// sprintf(msg, "%s%s%s%d", "opendir;", path, ";", fi->flags);
-	// printf("Sending to server %s\n", msg);
-	// int bytes_sent;
-	// if((bytes_sent = write(socket_fd, msg, strlen(msg) + 1)) < 0) {
-	// 	printf("%s\n", "Gotta retry");
-	// }
-	// printf("OPENDIR: Sent to server %s; total %d bytes\n", msg, bytes_sent);
-	// free(msg);
+	char status_str [11];
+	if(read(socket_fd, status_str, 11) < 0) {
+		printf("Couldn't read status %s\n", strerror(errno));
+	}
+
+	int status = atoi(status_str);
+	printf("Status is %d\n", status);
+
+	intptr_t res;
+	if(status == 0) {
+		
+		if(read(socket_fd, &res, sizeof(intptr_t)) < 0) {
+			printf("Couldn't read (intptr_t)DIR %s\n", strerror(errno));
+		}
+	}
+	fi->fh = res;
+
+	return status;
+	
+	
+	
 
 	// char resp [21];
 	// if(read(socket_fd, &resp, 21) < 0) {
@@ -133,20 +152,6 @@ static int raid1_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 		printf("%s\n", "READDIR: Couldn't send readdir message!");
 	}
 
-
-	// int resp_raw;
-	// if(read(socket_fd, &resp_raw, sizeof(int)) < 0) {
-	// 	printf("%s\n", "Couldn't receive status code");
-	// }
-
-	// uint32_t status_raw;
-	
-	// if(read(socket_fd, &status_raw, sizeof(status_raw)) < 0) {
-	// 	printf("READDIR: %s\n", strerror(errno));
-	// 	return -1;
-	// }
-	// printf("status_raw %d\n", status_raw);
-	// uint32_t status = ntohl(status_raw);
 	char status_str[12];
 	if(read(socket_fd, status_str, 12) < 0) {
 		printf("READDIR: %s\n", strerror(errno));
@@ -164,13 +169,14 @@ static int raid1_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 	while(1) {
 		printf("%s\n", "Inside while loop!!!");
 
-		char has_next[2];
-		if(read(socket_fd, &has_next, 2) < 0) {
+		// char has_next[2];
+		int has_next;
+		if(read(socket_fd, &has_next, sizeof(has_next)) < 0) {
 			printf("Couldn't read has_next %s\n", strerror(errno));
 		}
-		printf("has_next = %s\n", has_next);
+		printf("has_next = %d\n", has_next);
 
-		if(strcmp(has_next, "0") == 0)
+		if(has_next == 0)
 			break;
 		
 		if(read(socket_fd, de, sizeof(struct dirent)) < 0) {
@@ -185,21 +191,6 @@ static int raid1_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 		//some info, while client can no longer receive it, since its buffer is full
 		if (filler(buf, de->d_name, &st, 0)) //should last argument be nonzero?
 			break;
-		// struct readdir_resp response;
-		// if(read(socket_fd, &response, sizeof(response)) < 0) {
-		// 	printf("%s\n", "READDIR: Couldn't read response!");
-		// }
-
-		// if(response.status != 0) {
-		// 	printf("%s\n", "READDIR: End of directory reached");
-		// 	return 0;
-		// }
-
-		// printf("Status is %d; Next dir/file is %s\n", response.status, response.dir_name);
-
-
-		// if (filler(buf, response.dir_name, &response.st, 1)) 
-		// 	break;
 	}
 	free(de);
 	return 0;
@@ -224,7 +215,6 @@ static int raid1_access(const char *path, int mask) {
 	int res = atoi(response);
 	printf("Received result %d\n", res);
 	return -res;
-	// return 0;
 }
 
 

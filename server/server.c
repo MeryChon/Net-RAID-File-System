@@ -21,8 +21,7 @@
 
 
 
-static void fullpath(char fpath[MAX_PATH_LENGTH], const char *path)
-{
+static void fullpath(char fpath[MAX_PATH_LENGTH], const char *path){
     strcpy(fpath, mountpoint);
     if(mountpoint[strlen(mountpoint) - 1] != '/' && path[0] != '/') {
         strncat(fpath, "/", MAX_PATH_LENGTH);
@@ -34,13 +33,13 @@ static void fullpath(char fpath[MAX_PATH_LENGTH], const char *path)
     
 }
 
+
 static void print_stat(struct stat* stbuf) {
     printf("st_dev %lu; st_ino %lu; st_mode %lu; st_uid %lu; st_gid %lu \n; st_rdev %lu; st_size %lu; st_atime %lu; st_mtime %lu; st_ctime %lu; st_blksize %lu; st_blocks %lu;\n", 
             (size_t)stbuf->st_dev, (size_t)stbuf->st_ino, (size_t)stbuf->st_mode, (size_t)stbuf->st_uid, 
             (size_t)stbuf->st_gid, (size_t)stbuf->st_rdev, (size_t)stbuf->st_size, (size_t)stbuf->st_atime, 
             (size_t)stbuf->st_mtime, (size_t)stbuf->st_ctime, (size_t)stbuf->st_blksize, (size_t)stbuf->st_blocks);
 }
-
 
 static int read_from_buffer(int cfd, char buf[], int length) {
     int data_size;
@@ -68,6 +67,7 @@ static int read_from_buffer(int cfd, char buf[], int length) {
     }
     return bytes_received;
 }
+
 
 
 static int getattr_handler(int cfd, char* parameters) {
@@ -103,32 +103,58 @@ static int getattr_handler(int cfd, char* parameters) {
 
 
 static int opendir_handler(int cfd, char* parameters) {
-    char* path = strtok_r(parameters, ";", &parameters); //might need to use strtok_r and pass string to tokenize as an argument
+    printf("%s\n", "OPENDIR_HANDLER");
+    char* path = strtok_r(parameters, ";", &parameters); 
     assert(path != NULL);
     
     char fpath[MAX_PATH_LENGTH];
     fullpath(fpath, path);
     printf("Full path is %s\n", fpath);
 
-    char* flags_str = strtok_r(parameters, ";", &parameters);
-    assert(flags_str != NULL);
-    int flags = atoi(flags_str); //check?
-    printf("Flags are %d\n", flags);
+    // char* flags_str = strtok_r(parameters, ";", &parameters);
+    // assert(flags_str != NULL);
+    // int flags = atoi(flags_str); //check?
+    // printf("Flags are %d\n", flags);
 
-    int fd = open(path, flags);
+    // int fd = open(path, flags);
+    // int ret_val = 0;
+    // if (fd == -1) {
+    //    ret_val = errno;
+    // }
+
+    // char resp [21]; //length of two ints
+    // sprintf(resp, "%d;%d", ret_val, fd);
+    // printf("OPENDIR: Sending back %s\n", resp);
+    // if(write(cfd, &resp, strlen(resp) + 1) < 0) {
+    //     printf("%s\n", "OPENDIR: Couldn't send response");
+    // }
     int ret_val = 0;
-    if (fd == -1) {
-       ret_val = errno;
+
+    DIR *dp = opendir(fpath);
+
+    char status_str[11];
+    sprintf(status_str, "%d", 0);
+    if(dp == NULL) {
+        ret_val = errno;
     }
 
-    char resp [21]; //length of two ints
-    sprintf(resp, "%d;%d", ret_val, fd);
-    printf("OPENDIR: Sending back %s\n", resp);
-    if(write(cfd, &resp, strlen(resp) + 1) < 0) {
-        printf("%s\n", "OPENDIR: Couldn't send response");
+    sprintf(status_str, "%d", ret_val);
+
+
+    if(write(cfd, status_str, strlen(status_str) + 1) < 0) {
+        printf("Couldn't send status %s\n", strerror(errno));
     }
 
-    return ret_val;
+    if(ret_val == 0) {
+        intptr_t res = (intptr_t)dp;
+        printf("sending back %d\n", res);
+        if(write(cfd, &res, sizeof(intptr_t)) < 0) {
+            printf("Couldn't send DIR %s\n", strerror(errno));
+        }
+    }
+    
+
+    return -ret_val;
 }
 
 
@@ -169,12 +195,12 @@ static int readdir_handler(int cfd, char* parameters) {
     if(opendir_status != 0)
         return -errno;
 
-    // struct readdir_resp response;
-    char has_next [2];
-    strcpy(has_next, "1");
+    // char has_next [2];
+    // strcpy(has_next, "1");
+    int has_next = 1;
     while ((de = readdir(dp)) != NULL) {
-        printf("has_next = %s\n", has_next);
-        if(write(cfd, has_next, strlen(has_next)) < 0){
+        printf("has_next = %d\n", has_next);
+        if(write(cfd, &has_next, sizeof(has_next)) < 0){
             printf("Couldn't send has_next: %s\n", strerror(errno));
         }
 
@@ -183,48 +209,15 @@ static int readdir_handler(int cfd, char* parameters) {
             closedir(dp);
             return -errno;
         } 
-        /*struct stat st;
-        memset(&st, 0, sizeof(st));
-        st.st_ino = de->d_ino;
-        st.st_mode = de->d_type << 12;
-        printf("st.st_ino = %lu;  st.st_mode = %d;  de->d_type = %d; de_.de_name = %s\n", 
-                                        (size_t)st.st_ino, st.st_mode, de->d_type, de->d_name);
-        */
-
         
-        // response.status = 0;
-        // strcpy(response.dir_name, de->d_name);
-        // response.st = st;
-        /*if(write(cfd, &response, sizeof(response)) < 0) {
-            printf("%s\n", "READDIR_HANDLER: Couldn't send reponse");
-            closedir(dp);
-            return -errno;
-        } */
-
-        // if(write(cfd, de->d_name, strlen(de->d_name) + 1) < 0) {
-        //     printf("%s\n", "READDIR_HANDLER: Couldn't send de->dname");
-        //     return -errno; //TODO: something else
-        // }
-
-        // if(write(cfd, &st, sizeof(st)) < 0) {
-        //     printf("%s\n", "READDIR_HANDLER: Couldn't send struct stat");
-        //     return -errno; //TODO: something else
-        // }
     }
-    strcpy(has_next, "0");
-    printf("has_next = %s\n", has_next);
-    if(write(cfd, has_next, strlen(has_next)) < 0){
+    // strcpy(has_next, "0");
+    has_next = 0;
+    printf("has_next = %d\n", has_next);
+    if(write(cfd, &has_next, sizeof(has_next)) < 0){
         printf("Couldn't send has_next: %s\n", strerror(errno));
     }
 
-    // response.status = 1;
-    //strcpy(response.dir_name, "/");
-
-    // if(write(cfd, &response, sizeof(response)) < 0) { // sending status code 1 indicates that reading the directory is over 
-    //     printf("%s\n", "READDIR_HANDLER: Couldn't send end of dir indicator");
-    //     closedir(dp);
-    //     return -errno; //TODO: something else
-    // }
 
     closedir(dp);
     return 0;
