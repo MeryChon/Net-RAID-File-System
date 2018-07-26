@@ -150,7 +150,7 @@ static void parse_config_file(const char* config_file_path){
 }
 
 
-static int  start(const char* program_name) {
+static int start(const char* program_name) {
 	int i = 0;
 	for(; i<num_storages; i++) {
 		struct disk_info storage_info = raids[i];

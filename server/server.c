@@ -71,6 +71,7 @@ static int read_from_buffer(int cfd, char buf[], int length) {
 
 
 static int getattr_handler(int cfd, char* parameters) {
+    printf("%s\n", "=======================GETATTR_HANDLER");
     char* path = strtok_r(parameters, ";", &parameters); //might need to use strtok_r and pass string to tokenize as an argument
     assert(path != NULL);
     
@@ -103,7 +104,7 @@ static int getattr_handler(int cfd, char* parameters) {
 
 
 static int opendir_handler(int cfd, char* parameters) {
-    printf("%s\n", "OPENDIR_HANDLER");
+    printf("%s\n", "=======================OPENDIR_HANDLER");
     char* path = strtok_r(parameters, ";", &parameters); 
     assert(path != NULL);
     
@@ -129,16 +130,18 @@ static int opendir_handler(int cfd, char* parameters) {
     //     printf("%s\n", "OPENDIR: Couldn't send response");
     // }
     int ret_val = 0;
+    DIR *dp;
 
-    DIR *dp = opendir(fpath);
+    dp = opendir(fpath);
 
-    char status_str[11];
-    sprintf(status_str, "%d", 0);
+    char status_str[12];
+    // sprintf(status_str, "%d", 0);
     if(dp == NULL) {
         ret_val = errno;
     }
 
     sprintf(status_str, "%d", ret_val);
+    printf("Sending back status string %s\n", status_str);
 
 
     if(write(cfd, status_str, strlen(status_str) + 1) < 0) {
@@ -159,8 +162,42 @@ static int opendir_handler(int cfd, char* parameters) {
 
 
 
+static int send_readdir_reply(int cfd, struct dirent* de, int has_next_dir) {
+    int has_next = has_next_dir;
+    char buf[1024];
+    memcpy(buf, &has_next, sizeof(int));
+    // sprintf(has_next_str, "%d", has_next);
+
+    printf("has_next = %d\n", has_next);
+    if(write(cfd, buf, sizeof(int)) < 0) {
+        printf("Couldn't send has_next: %s\n", strerror(errno));
+    }
+    // free(has_next_str);
+    if(has_next) {
+        struct stat st;
+        memset(&st, 0, sizeof(st));
+        st.st_ino = de->d_ino;
+        st.st_mode = de->d_type << 12;
+        print_stat(&st);
+        if(write(cfd, &st, sizeof(struct stat)) < 0) {
+            printf("Couldn't send struct stat %s\n", strerror(errno));
+            return -errno;
+        }
+
+        printf("Dirent->d_name is %s\n", de->d_name);
+        if(write(cfd, de->d_name, strlen(de->d_name) + 1) < 0) {
+            printf("Couldn't send dirname %s\n", strerror(errno));
+            return -errno;
+        }
+    }
+    return 0;
+}
+
+
+
 static int readdir_handler(int cfd, char* parameters) {
-    char* path = strtok_r(parameters, ";", &parameters); //might need to use strtok_r and pass string to tokenize as an argument
+    printf("%s\n", "=======================READDIR_HANDLER");
+    char* path = strtok_r(parameters, ";", &parameters);
     assert(path != NULL);    
     char fpath[MAX_PATH_LENGTH];
     fullpath(fpath, path);
@@ -185,7 +222,6 @@ static int readdir_handler(int cfd, char* parameters) {
         printf("READDIR_HANDLER: error %s\n", strerror(errno));
     }
 
-    // uint32_t status_resp = htonl(opendir_status);
     char status_resp [12];
     sprintf(status_resp, "%d",  opendir_status);
     printf("READDIR_HANDLER: Sending status %s \n", status_resp);
@@ -195,29 +231,10 @@ static int readdir_handler(int cfd, char* parameters) {
     if(opendir_status != 0)
         return -errno;
 
-    // char has_next [2];
-    // strcpy(has_next, "1");
-    int has_next = 1;
     while ((de = readdir(dp)) != NULL) {
-        printf("has_next = %d\n", has_next);
-        if(write(cfd, &has_next, sizeof(has_next)) < 0){
-            printf("Couldn't send has_next: %s\n", strerror(errno));
-        }
-
-        if(write(cfd, de, sizeof(struct dirent)) < 0) {
-            printf("Couldn't send current dirent: %s\n", strerror(errno));
-            closedir(dp);
-            return -errno;
-        } 
-        
+        send_readdir_reply(cfd, de, 1);        
     }
-    // strcpy(has_next, "0");
-    has_next = 0;
-    printf("has_next = %d\n", has_next);
-    if(write(cfd, &has_next, sizeof(has_next)) < 0){
-        printf("Couldn't send has_next: %s\n", strerror(errno));
-    }
-
+    send_readdir_reply(cfd, NULL, 0);
 
     closedir(dp);
     return 0;
@@ -225,6 +242,7 @@ static int readdir_handler(int cfd, char* parameters) {
 
 
 static int access_handler(int cfd, char* parameters) {
+    printf("%s\n", "=======================ACCESS_HANDLER");
     char* path = strtok_r(parameters, ";", &parameters); //might need to use strtok_r and pass string to tokenize as an argument
     assert(path != NULL);    
     char fpath[MAX_PATH_LENGTH];
@@ -249,6 +267,29 @@ static int access_handler(int cfd, char* parameters) {
         printf("%s\n", "Couldn't send response to client");
     }
     return ret_val;
+}
+
+
+
+static int mkdir_handler(int cfd) {
+    char path[MAX_PATH_LENGTH + 1];
+    if(read(cfd, path, MAX_PATH_LENGTH) < 0) {
+        printf("Couldn't read path %s\n", strerror(errno));
+    }
+
+
+    mode_t mode;
+    if(read(cfd, &mode, sizeof(mode_t)) < 0) {
+        printf("Couldn't read mode %s\n", strerror(errno));
+    }
+
+    int res;
+    res = mkdir(path, mode);
+    if (res == -1) {
+        printf("on mkdir %s\n", strerror(errno));
+        return -errno;
+    }
+
 }
 
 
@@ -279,6 +320,8 @@ static void client_handler(int cfd) {
             readdir_handler(cfd, rest);
         } else if(strcmp(syscall, "access") == 0) {
             access_handler(cfd, rest);
+        } else if(strcmp(syscall, "mkdir") == 0) {
+            mkdir_handler(cfd);
         }
     }
     close(cfd);

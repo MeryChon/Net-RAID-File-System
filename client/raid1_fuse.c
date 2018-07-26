@@ -38,7 +38,7 @@ struct fuse_operations raid1_operations = {
 	// .unlink		= raid1_unlink, 
 	.rmdir		= raid1_rmdir, 
 	.mkdir		= raid1_mkdir, 
-	.opendir	= raid1_opendir, 
+	// .opendir	= raid1_opendir, 
 	// .releasedir = raid1_releasedir, 
 	.create 	= raid1_create, 
 	.access = raid1_access,
@@ -55,7 +55,7 @@ static void print_stat(struct stat* stbuf) {
 
 
 static int raid1_getattr(const char *path, struct stat *stbuf) {
-	printf("%s\n", "SYSCALL GETATTR");
+	printf("%s\n", "--------------------SYSCALL GETATTR");
 	char* msg = malloc(9 + strlen(path)); //getattr  + ; + path + \0
 	assert(msg != NULL);
 
@@ -85,7 +85,7 @@ static int raid1_getattr(const char *path, struct stat *stbuf) {
 
 
 static int raid1_opendir (const char* path, struct fuse_file_info* fi) {
-	printf("%s\n", "SYSCALL OPENDIR");
+	printf("%s\n", "--------------------SYSCALL OPENDIR");
 	char* msg = malloc(10 + strlen(path)); //opendir  + ; + path + \0
 	assert(msg != NULL);
 	
@@ -98,8 +98,8 @@ static int raid1_opendir (const char* path, struct fuse_file_info* fi) {
 	printf("OPENDIR: Sent to server %s; total %d bytes\n", msg, bytes_sent);
 	free(msg);
 
-	char status_str [11];
-	if(read(socket_fd, status_str, 11) < 0) {
+	char status_str [12];
+	if(read(socket_fd, status_str, 12) < 0) {
 		printf("Couldn't read status %s\n", strerror(errno));
 	}
 
@@ -142,7 +142,7 @@ static int raid1_opendir (const char* path, struct fuse_file_info* fi) {
 static int raid1_readdir(const char *path, void *buf, fuse_fill_dir_t filler, 
 		off_t offset, struct fuse_file_info *fi) 
 {
-	printf("%s\n", "SYSCALL READDIR");
+	printf("%s\n", "--------------------SYSCALL READDIR");
 	char* msg = malloc(21 + strlen(path)); //readdir  + ; + path + ; + offset + \0
 	assert(msg != NULL);
 	sprintf(msg, "%s;%s;%lu", "readdir", path, (size_t)offset);
@@ -151,6 +151,7 @@ static int raid1_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 	if(write(socket_fd, msg, strlen(msg) + 1) < 0) {
 		printf("%s\n", "READDIR: Couldn't send readdir message!");
 	}
+	free(msg);
 
 	char status_str[12];
 	if(read(socket_fd, status_str, 12) < 0) {
@@ -164,41 +165,49 @@ static int raid1_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 		return -status;
 	}
 
-	struct dirent *de = malloc(sizeof(struct dirent));
-	assert(de != NULL);
+	int has_next;
+	char* dirname = malloc(MAX_DIR_NAME_LENGTH + 1);
+	assert(dirname != NULL);
+	char buffer[1024];
 	while(1) {
-		printf("%s\n", "Inside while loop!!!");
-
-		// char has_next[2];
-		int has_next;
-		if(read(socket_fd, &has_next, sizeof(has_next)) < 0) {
+		if(read(socket_fd, buffer, sizeof(int)) < 0) {
 			printf("Couldn't read has_next %s\n", strerror(errno));
 		}
+		memcpy(&has_next, buffer, sizeof(int));
 		printf("has_next = %d\n", has_next);
 
 		if(has_next == 0)
 			break;
 		
-		if(read(socket_fd, de, sizeof(struct dirent)) < 0) {
-			printf("Couldn't read dirent %s\n", strerror(errno));
-			//Need timeoout and hotswap
-		}
 		struct stat st;
-		memset(&st, 0, sizeof(st));
-		st.st_ino = de->d_ino;
-		st.st_mode = de->d_type << 12;
+		if(read(socket_fd, &st, sizeof(struct stat)) < 0) {
+			printf("Couldn't read struct stat %s\n", strerror(errno));
+			free(dirname);
+			//TODO closedir or hotswap
+			return -errno;
+		}
+		print_stat(&st);
+
+		
+		if(read(socket_fd, dirname, MAX_DIR_NAME_LENGTH) < 0) {
+			printf("Couldn't read dirname %s\n", strerror(errno));
+			free(dirname);
+			//TODO closedir or hotswap
+			return -errno;
+		}
+		printf("%s\n", dirname);
 		//TODO: this check should send something to server, or server might block trying to send 
 		//some info, while client can no longer receive it, since its buffer is full
-		if (filler(buf, de->d_name, &st, 0)) //should last argument be nonzero?
+		if (filler(buf, dirname, &st, 0)) //should last argument be nonzero?
 			break;
 	}
-	free(de);
+	free(dirname);
 	return 0;
 }
 
 
 static int raid1_access(const char *path, int mask) {
-	printf("%s\n", "SYSCALL ACCESS");
+	printf("%s\n", "--------------------SYSCALL ACCESS");
 	char msg[20 + MAX_PATH_LENGTH]; //access;path;mask\0
 	sprintf(msg, "%s;%s;%d", "access", path, mask);
 	printf("Sending %s\n", msg);
@@ -219,19 +228,36 @@ static int raid1_access(const char *path, int mask) {
 
 
 static int raid1_mkdir(const char* path, mode_t mode) {
-	printf("%s\n", "SYSCALL MKDIR");
-	int res;
+	printf("%s\n", "--------------------SYSCALL MKDIR");
+	// int res;
 
-	res = mkdir(path, mode);
-	if (res == -1)
-		return -errno;
+	
+
+	char syscall[6] = "mkdir";
+	if(write(socket_fd, syscall, strlen(syscall) + 1) < 0){
+		printf("Couldn't send syscall %s\n", strerror(errno));
+		return -1;
+	}
+
+	if(write(socket_fd, path, strlen(path) + 1) < 0) {
+		printf("Couldn't send path %s\n", strerror(errno));
+		return -1;
+	}
+
+	if(write(socket_fd, &mode, sizeof(mode_t)) < 0){
+		printf("Couldn't send mode %s\n", strerror(errno));
+		return -1;
+	}
+
+
+
 
 	return 0;
 }
 
 
 static int raid1_rmdir(const char* path){
-	printf("%s\n", "SYSCALL RMDIR");
+	printf("%s\n", "--------------------SYSCALL RMDIR");
 	int res;
 
 	res = rmdir(path);
@@ -243,7 +269,7 @@ static int raid1_rmdir(const char* path){
 
 
 static int raid1_create(const char *path, mode_t mode, struct fuse_file_info *fi) {
-	printf("%s\n", "SYSCALL CREATE");
+	printf("%s\n", "--------------------SYSCALL CREATE");
 	int res;
 
 	res = open(path, fi->flags, mode);
