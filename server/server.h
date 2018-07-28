@@ -4,6 +4,7 @@
 #include <stdio.h>
 
 char* mountpoint;
+// int client_sfd;
 
 // struct stat1 {
 // 	int error_code;

@@ -45,7 +45,7 @@ int log_connection(char* address) {
 }
 
 
-int log_error(char* error_msg) {
+int log_error(char* error_msg, int error_num) {
 	//TODO: get errno and so on ...
 	if(error_msg != NULL){
 		FILE* log_file = fopen(log_file_path, "a");
@@ -54,7 +54,7 @@ int log_error(char* error_msg) {
 			struct tm* tm = localtime(&t);
 			char time_string [26];
 			strftime(time_string, 26, "%Y-%m-%d %H:%M:%S", tm);
-			fprintf(log_file, "%s --- %s %s \n", time_string, "Error: ", error_msg);
+			fprintf(log_file, "%s --- Error: %s %s \n", time_string, error_msg, strerror(error_num));
 			fclose(log_file);
 		}
 	}	
