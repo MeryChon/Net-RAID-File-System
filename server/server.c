@@ -13,6 +13,7 @@
 #include <netinet/ip.h>
 #include <arpa/inet.h>
 #include <assert.h>
+#include <fcntl.h>
 
 #define BACKLOG 10
 #define MAX_CLIENT_MSG_LENGTH 2048
@@ -45,15 +46,15 @@ static int getattr_handler(int client_sfd, char path[]) {
 	printf("passed args %s\n", path);
 	char fpath[MAX_PATH_LENGTH];
     fullpath(fpath, path);
-    printf("Full path is %s\n", fpath);
+    printf("Full path is %s. length %lu\n", fpath, strlen(fpath));
 
     struct stat* stbuf = malloc(sizeof(struct stat));
     assert(stbuf != NULL);
-    int res = stat(path, stbuf);
+    int res = stat(fpath, stbuf);
   	int ret_val = 0;
     if(res == -1) {
     	ret_val = errno;
-    	printf("stat error %s\n", strerror(errno));
+    	printf("stat error! %s\n", strerror(errno));
     }
     print_stat(stbuf);
 
@@ -64,12 +65,242 @@ static int getattr_handler(int client_sfd, char path[]) {
     if(write(client_sfd, response, sizeof(int) + sizeof(struct stat)) < 0) {
     	printf("Couldn't send response %s\n", strerror(errno));
     }
+    printf("Response is %d\n", ret_val);
+
+	return -ret_val;
+}
+
+static int rename_handler(int client_sfd, char args[]) {
+	printf("%s\n", "--------------------RENAME HANDLER");
+	char oldpath[MAX_PATH_LENGTH];
+	strcpy(oldpath, args);
+	printf("Old path %s\n", oldpath);
+	char f_oldpath[MAX_PATH_LENGTH];
+	fullpath(f_oldpath, oldpath);
+    printf("Full path is %s\n", f_oldpath);
+
+	char newpath[MAX_PATH_LENGTH];
+	strcpy(newpath, args + strlen(oldpath) + 1);
+	printf("New path %s\n", newpath);
+	char f_newpath[MAX_PATH_LENGTH];
+	fullpath(f_newpath, newpath);
+    printf("Full path is %s\n", f_newpath);
+
+	int res, ret_val;
+	ret_val = 0;
+	res = rename(f_oldpath, f_newpath);
+	if (res == -1) {
+		ret_val = errno;
+		// return -errno;
+	}
+
+	if(write(client_sfd, &ret_val, sizeof(int)) <= 0) {
+		printf("%s\n", "Couldn't send response");
+	}
 
 	return -ret_val;
 }
 
 
+static int mkdir_handler (int client_sfd, char args[]) {
+	printf("%s\n", "--------------------MKDIR HANDLER");
+	char path[MAX_PATH_LENGTH];
+	strcpy(path, args);
+	printf("Path is %s\n", path);
+	char fpath[MAX_PATH_LENGTH];
+    fullpath(fpath, path);
+    printf("Full path is %s length %lu\n", fpath, strlen(fpath));
 
+	mode_t mode;
+	memcpy(&mode, args + strlen(path) + 1, sizeof(mode_t));
+	printf("mode is %d\n", mode);
+
+	int res;
+	int ret_val = 0;
+	res = mkdir(fpath, mode);
+	if (res == -1) {
+		ret_val = errno;
+	}
+	printf("Response is %d\n", ret_val);
+
+	if(write(client_sfd, &ret_val, sizeof(int)) <= 0) {
+		printf("Couldn't send response %s\n", strerror(errno));
+	}
+
+	return -ret_val;
+}
+
+static int rmdir_handler (int client_sfd, char args[]) {
+	printf("%s\n", "--------------------RMDIR HANDLER");
+
+	printf("args are%s\n", args);
+	char fpath[MAX_PATH_LENGTH];
+    fullpath(fpath, args);
+    printf("Full path is %s length %lu\n", fpath, strlen(fpath));
+
+    int res;
+    int ret_val = 0;
+	res = rmdir(fpath);
+	if (res == -1) {
+		ret_val = errno;
+	}
+	printf("Retval is %d\n", ret_val);
+
+	if(write(client_sfd, &ret_val, sizeof(int)) <= 0) {
+		printf("Couldn't send response %s\n", strerror(errno));
+	}
+	return -ret_val;
+}
+
+static int open_handler (int client_sfd, char args[]) {
+	printf("%s\n", "--------------------OPEN HANDLER");
+	char path[MAX_PATH_LENGTH];
+	strcpy(path, args);
+	printf("path is %s\n", path);
+
+	char fpath[MAX_PATH_LENGTH];
+    fullpath(fpath, args);
+    printf("Full path is %s length %lu\n", fpath, strlen(fpath));
+
+    int flags;
+    memcpy(&flags, args + strlen(path) + 1, sizeof(int));
+    printf("flags are %d\n", flags);
+
+    int fd;
+    int status = 0;
+    fd = open(fpath, flags);
+	if (fd == -1) {
+		printf("open returner -1 %s\n", strerror(errno));
+		status = errno;
+	}
+	printf("status is %d,fd is %d\n", status, fd);
+
+	char response[2*sizeof(int)];
+	memcpy(response, &status, sizeof(int));
+	memcpy(response + sizeof(int), &fd, sizeof(int));
+
+	if(write(client_sfd, response, 2 * sizeof(int)) <= 0) {
+		printf("Couldn't send response %s\n", strerror(errno));
+	}
+	return -status;
+
+	// close(res); ???????????????????
+}
+
+
+static int read_handler (int client_sfd, char args[]) {
+	printf("%s\n", "--------------------READ HANDLER");
+	char path[MAX_PATH_LENGTH];
+	strcpy(path, args);
+	printf("path is %s\n", path);
+
+	char fpath[MAX_PATH_LENGTH];
+    fullpath(fpath, args);
+    printf("Full path is %s length %lu\n", fpath, strlen(fpath));
+
+    size_t size;
+    off_t offset;
+
+    memcpy(&size, args + strlen(path) + 1, sizeof(size_t));
+    memcpy(&offset, args + strlen(path) + 1 + sizeof(size_t), sizeof(off_t));
+    printf("size is %lu, offset is %lu\n", size, offset);
+
+    int fd, res;
+	int ret_val = 0;
+	int bytes_read = -1;
+	char* buf = malloc(size);
+	assert(buf != NULL);
+	fd = open(fpath, O_RDONLY);
+	if (fd == -1){
+		ret_val = errno;
+		printf("fd is -1 %s\n", strerror(errno));
+	} else {
+		res = pread(fd, buf, size, offset);
+		if (res == -1) {
+			ret_val = errno;
+			printf("pread returned -1 %s\n", strerror(errno));
+		}
+		bytes_read = res;
+		close(fd);
+	}
+	printf("ret_val %d, bytes_read %d\n", ret_val, bytes_read);
+
+	char* response = malloc(2*sizeof(int) + size);
+	assert(response != NULL);
+	memcpy(response, &ret_val, sizeof(int));
+	memcpy(response + sizeof(int), &bytes_read, sizeof(int));
+	memcpy(response+2*sizeof(int), buf, size);
+	if(write(client_sfd, response, 2*sizeof(int) + size) <= 0) {
+		printf("Couldn't send response %s\n", strerror(errno));
+	}
+
+	free(buf);
+	free(response);
+	return -ret_val;
+}
+
+
+static char* get_path_from_args(char args[], int* path_length) {
+	char path[MAX_PATH_LENGTH];
+	strcpy(path, args);
+	printf("path is %s\n", path);
+
+	char* fpath = malloc(MAX_PATH_LENGTH);
+	assert(fpath != NULL);
+	fullpath(fpath, args);
+    printf("Full path is %s length %lu\n", fpath, strlen(fpath));
+
+    return fpath;
+}
+
+
+static int write_handler (int client_sfd, char args[]) {
+	printf("%s\n", "--------------------WRITE HANDLER");
+	int path_length;
+	char* fpath = get_path_from_args(args, &path_length);
+
+    size_t size;
+    off_t offset;
+
+    memcpy(&size, args + path_length + 1, sizeof(size_t));
+    memcpy(&offset, args + path_length + 1 + sizeof(size_t), sizeof(off_t));
+    printf("size is %lu, offset is %lu\n", size, offset);
+
+    char* buf = malloc(size);
+    assert(buf != NULL);
+    memcpy(buf, args+path_length+1+sizeof(size_t)+sizeof(off_t), size);
+
+    int fd, res;
+    int ret_val = 0;
+    int bytes_written = -1;
+
+    fd = open(fpath, O_WRONLY);
+	if (fd == -1) {
+		ret_val = errno;
+		printf("open returned -1 %s\n", strerror(errno));
+	} else {
+		res = pwrite(fd, buf, size, offset);
+		if (res == -1) {
+			ret_val = errno;
+			printf("pwrite returned -1 %s\n", strerror(errno));
+		}
+		bytes_written = res;
+		close(fd);
+	}
+	printf("ret_val %d, bytes_written %d\n", ret_val, bytes_written);
+
+	char* response = malloc(2*sizeof(int));
+	assert(response != NULL);
+	memcpy(response, &ret_val, sizeof(int));
+	memcpy(response + sizeof(int), &bytes_written, sizeof(int));
+	if(write(client_sfd, response, 2*sizeof(int)) <= 0) {
+		printf("Couldn't send response %s\n", strerror(errno));
+	}
+
+	free(response);
+	
+	return -ret_val;
+}
 
 
 static int read_from_client(int client_sfd, char* syscall, char* args) {
@@ -78,25 +309,25 @@ static int read_from_client(int client_sfd, char* syscall, char* args) {
 	if(bytes_read < 0) {
 		return -1;
 	}
-	
-	printf("buffer is %s\n", buf + sizeof(int));
+	printf("Bytes read %d\n", bytes_read);
+	printf("Buffer is %s\n", buf + sizeof(int));
 
 	int info_length;
 	memcpy(&info_length, buf, sizeof(int));
-	printf("Number of bytes of info %d\n", info_length);
+	printf("info length %d\n", info_length);
 	char* info = malloc(info_length + 1);
 	assert(info != NULL);
 	memcpy(info, buf+sizeof(int), info_length);
-	buf[sizeof(int)+info_length] = '\0';
-	printf("the rest of the buffer %s\n", buf + sizeof(int));
+	// buf[sizeof(int)+info_length] = '\0';
+	// printf("the rest of the buffer %s\n", buf + sizeof(int));
 
 	strcpy(syscall, strtok(buf + sizeof(int), ";"));
 	assert(syscall != NULL);
 	printf("Syscall is %s\n", syscall);
-	strcpy(args, strtok(NULL, ";"));
+	memcpy(args, strtok(NULL, ";"), info_length - strlen(syscall) - 1);
 	// memcpy(args, buf + sizeof(int) + strlen(syscall) + 1, info_length - (sizeof(int) + strlen(syscall)));
 	printf("args %s\n", args);
-	printf("Bytes read %d\n", bytes_read);
+	// printf("Bytes read %d\n", bytes_read);
 	return bytes_read;
 }
 
@@ -117,9 +348,19 @@ static int client_handler(int client_sfd) {
 		}
 
 		if(strcmp(syscall, "getattr") == 0) {
-			printf("%s\n", "calling getattr handler");
-			getattr_handler(client_sfd, args);
-			
+			getattr_handler(client_sfd, args);			
+		} else if(strcmp(syscall, "rename") == 0) {
+			rename_handler(client_sfd, args);
+		} else if(strcmp(syscall, "mkdir") == 0) {
+			mkdir_handler(client_sfd, args);
+		} else if(strcmp(syscall, "rmdir") == 0) {
+			rmdir_handler(client_sfd, args);
+		} else if(strcmp(syscall, "open") == 0) {
+			open_handler(client_sfd, args);
+		} else if(strcmp(syscall, "read") == 0) {
+			read_handler(client_sfd, args);
+		} else if(strcmp(syscall, "write") == 0) {
+			write_handler(client_sfd, args);
 		}
 	}
 	free(syscall);

@@ -15,30 +15,31 @@
 // #define MAX_PATH_LENGTH 200
 
 static int raid1_getattr(const char *path, struct stat *stbuf);
-static int raid1_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi);
+// static int raid1_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi);
 static int raid1_open(const char *path, struct fuse_file_info *fi);
 static int raid1_read(const char *path, char *buf, size_t size, off_t offset, struct fuse_file_info *fi);
 // static int raid1_opendir (const char* path, struct fuse_file_info* fi);
-// static int raid1_write(const char* path, char *buf, size_t size, off_t offset, struct fuse_file_info* fi);
+static int raid1_write(const char *path, const char *buf, size_t size, off_t offset, struct fuse_file_info *fi);
 // static int raid1_create(const char *path, mode_t mode, struct fuse_file_info *fi);
-// static int raid1_mkdir(const char* path, mode_t mode);
-// static int raid1_rmdir(const char* path);
-static int raid1_access(const char *path, int mask);
+static int raid1_mkdir(const char* path, mode_t mode);
+static int raid1_rmdir(const char* path);
+// static int raid1_access(const char *path, int mask);
 static int raid1_mknod(const char *path, mode_t mode, dev_t rdev);
+static int raid1_rename(const char* from, const char *to);
 
 
 
 struct fuse_operations raid1_operations = {
 	.getattr	= raid1_getattr,
-	.readdir	= raid1_readdir,
+	// .readdir	= raid1_readdir,
 	.open		= raid1_open,
 	.read		= raid1_read,
-	// .write 		= raid1_write, 
+	.write 		= raid1_write, 
 	// .releasedir = raid1_releasedir,
-	// .rename		= raid1_rename, 
+	.rename		= raid1_rename, 
 	// .unlink		= raid1_unlink, 
-	// .rmdir		= raid1_rmdir, 
-	// .mkdir		= raid1_mkdir, 
+	.mkdir		= raid1_mkdir, 
+	.rmdir		= raid1_rmdir, 
 	// .opendir	= raid1_opendir, 
 	// .releasedir = raid1_releasedir, 
 	// .create 	= raid1_create, 
@@ -55,9 +56,32 @@ static void print_stat(struct stat* stbuf) {
 }
 
 
+static char* fill_in_basic_info (int args_length, const char* syscall, const char* path, int* num_bytes_written) {
+	char* buf = malloc(sizeof(int) + args_length);
+	assert(buf != NULL);
+
+	int bytes_written = 0;
+	int n = args_length;
+
+	printf("in fill_in_basic_info args_length=%d\n", n);
+	memcpy(buf, &n, sizeof(int));
+	bytes_written += sizeof(int);
+	printf("bytes_written=%d\n", bytes_written);
+	printf("args length %d\n", args_length);
+	strcpy(buf + bytes_written, syscall);
+	bytes_written += strlen(syscall);
+	printf("bytes_written=%d\n", bytes_written);
+	strcpy(buf + bytes_written, path);
+	bytes_written += strlen(path) + 1;
+	printf("Part of the buf %s\n", buf + sizeof(int));
+	*num_bytes_written = bytes_written;
+	
+	return buf;
+}
+
 
 static int raid1_getattr(const char *path, struct stat *stbuf) {
-	printf("%s\n", "--------------------SYSCALL GETATTR");
+	printf("%s\n", "-------------------- GETATTR");
 	int args_length = 8 + strlen(path)+1;
 	char* msg = malloc(sizeof(int) + 9 + strlen(path)); //
 	assert(msg != NULL);
@@ -65,12 +89,13 @@ static int raid1_getattr(const char *path, struct stat *stbuf) {
 	memcpy(msg, &args_length, sizeof(int));
 
 	sprintf(msg+sizeof(int), "%s%s", "getattr;", path);
-	printf("%s\n", msg);
+	printf("Passed path %s.\n", path);
 	
 	int n;
 	if((n = write(socket_fd, msg, args_length + sizeof(int))) < 0) {
 		printf("%s\n", "Gotta retry");
 	}
+	printf("Part of the message %s\n", msg + sizeof(int));
 	printf("Written bytes %d\n", n);
 	free(msg);
 
@@ -89,200 +114,324 @@ static int raid1_getattr(const char *path, struct stat *stbuf) {
 }
 
 
-static int raid1_opendir (const char* path, struct fuse_file_info* fi) {
-	printf("%s\n", "--------------------SYSCALL OPENDIR");
-}
-
-static int raid_opendir (const char* path, struct fuse_file_info* fi) {
-	printf("%s\n", "--------------------SYSCALL OPENDIR");
-	char* msg = malloc(10 + strlen(path)); //opendir  + ; + path + \0
+static int raid1_mkdir(const char* path, mode_t mode) {
+	printf("%s\n", "-------------------- MKDIR");
+	int args_length = 6 + strlen(path)+ 1 + sizeof(mode_t);
+	char* msg = malloc(sizeof(int) + args_length); //
 	assert(msg != NULL);
-	
-	sprintf(msg, "opendir;%s", path);
-	printf("Sending to server %s\n", msg);
-	int bytes_sent;
-	if((bytes_sent = write(socket_fd, msg, strlen(msg) + 1)) < 0) {
-		printf("%s\n", "Gotta retry");
+
+	memcpy(msg, &args_length, sizeof(int));
+	printf("args length %d\n", args_length);
+
+	strcpy(msg + sizeof(int), "mkdir;");
+	printf("%s\n", msg + sizeof(int));
+
+	strcpy(msg + sizeof(int) + 6, path);
+	printf("%s\n", msg + sizeof(int) + 6);
+
+	memcpy(msg + sizeof(int) + 6 + strlen(path) + 1, &mode, sizeof(mode_t));
+
+	if(write(socket_fd, msg, sizeof(int) + args_length) <= 0) {
+		printf("Couldn't send message %s\n", strerror(errno));
 	}
-	printf("OPENDIR: Sent to server %s; total %d bytes\n", msg, bytes_sent);
+
+	int response;
+	if(read(socket_fd, &response, sizeof(int)) <= 0) {
+		printf("Couldn't receive response %s\n", strerror(errno));
+	}
+	printf("server responded with %d\n", response);
 	free(msg);
-
-	char status_str [12];
-	if(read(socket_fd, status_str, 12) < 0) {
-		printf("Couldn't read status %s\n", strerror(errno));
-	}
-
-	int status = atoi(status_str);
-	printf("Status is %d\n", status);
-
-	intptr_t res;
-	if(status == 0) {
-		
-		if(read(socket_fd, &res, sizeof(intptr_t)) < 0) {
-			printf("Couldn't read (intptr_t)DIR %s\n", strerror(errno));
-		}
-	}
-	fi->fh = res;
-
-	return status;
-	
-	
-	
-
-	// char resp [21];
-	// if(read(socket_fd, &resp, 21) < 0) {
-	// 	printf("%s\n", "Couldn't read response to opendir");
-	// }
-	// printf("OPENDIR: Received response %s\n", resp);
-
-	// char* retval_str = strtok(resp, ";");
-	// assert(retval_str != NULL);
-	// int ret_val = atoi(retval_str);
-	// printf("OPENDIR: Received ret_val %d\n", ret_val);
-
-	// char* fd_str = strtok(NULL, ";");
-	// assert(fd_str != NULL);
-	// fi->fh = atoi(fd_str); //check?
-	// printf("OPENDIR: return vale %d, file handler %lu.\n", ret_val, (size_t)fi->fh);
-	// return -ret_val;
+	return -response;
 }
 
 
-static int raid1_readdir(const char *path, void *buf, fuse_fill_dir_t filler, 
-		off_t offset, struct fuse_file_info *fi) 
-{
-	printf("%s\n", "--------------------SYSCALL READDIR");
-	char* msg = malloc(21 + strlen(path)); //readdir  + ; + path + ; + offset + \0
-	assert(msg != NULL);
-	sprintf(msg, "%s;%s;%lu", "readdir", path, (size_t)offset);
-	
-	printf("READDIR: Going to send: %s\n", msg);
-	if(write(socket_fd, msg, strlen(msg) + 1) < 0) {
-		printf("%s\n", "READDIR: Couldn't send readdir message!");
-	}
-	free(msg);
+static int raid1_rmdir(const char* path){
+	printf("%s\n", "-------------------- RMDIR");
 
-	char status_str[12];
-	if(read(socket_fd, status_str, 12) < 0) {
-		printf("READDIR: %s\n", strerror(errno));
-		return -errno;
+	int args_length = 6 + strlen(path)+ 1;
+	char* msg = malloc(sizeof(int) + args_length); //
+	assert(msg != NULL);
+
+	memcpy(msg, &args_length, sizeof(int));
+	printf("args length %d\n", args_length);
+
+	strcpy(msg + sizeof(int), "rmdir;");
+
+	strcpy(msg + sizeof(int) + 6, path);
+	printf("part of message %s\n", msg + sizeof(int));
+
+	if(write(socket_fd, msg, sizeof(int) + args_length) <= 0) {
+		printf("Couldn't send message %s\n", strerror(errno));
 	}
-	int status = atoi(status_str);
-	printf("Status is %s or %d\n", status_str, status);
-	if(status != 0) {
-		printf("READDIR: After opendir server sent %s\n", strerror(status));
+
+	int response;
+	if(read(socket_fd, &response, sizeof(int)) <= 0) {
+		printf("Couldn't receive response %s\n", strerror(errno));
+	}
+	printf("Server responded with %d\n", response);
+	free(msg);
+	return -response;
+}
+
+
+
+static int raid1_open(const char *path, struct fuse_file_info *fi) {
+	printf("%s\n", "-------------------- OPEN");
+
+	int args_length = 5 + strlen(path) + 1 + sizeof(int);
+	char* msg = malloc(sizeof(int) + args_length); //
+	assert(msg != NULL);
+
+	memcpy(msg, &args_length, sizeof(int));
+	printf("args length %d\n", args_length);
+
+	strcpy(msg + sizeof(int), "open;");
+	strcpy(msg + sizeof(int) + 5, path);
+	printf("%s\n", msg + sizeof(int));
+
+	int flags = fi->flags;
+	printf("flags are %d\n", flags);
+	memcpy(msg + sizeof(int) + 5 + strlen(path) + 1, &flags, sizeof(int));
+
+	if(write(socket_fd, msg, sizeof(int) + args_length) <= 0) {
+		printf("Couldn't send message %s\n", strerror(errno));
+	}
+
+	int status, fd;
+	char response[2*sizeof(int)];
+	if(read(socket_fd, response, 2*sizeof(int)) <= 0) {
+		printf("Couldn't receive response %s\n", strerror(errno));
+	}
+	memcpy(&status, response, sizeof(int));
+	memcpy(&fd, response + sizeof(int), sizeof(int));
+	printf("status is %d, fd is %d\n", status, fd);
+	fi->fh = fd;
+
+	free(msg);
+	return -status;
+}
+
+
+static int raid1_read(const char *path, char *buf, size_t size, off_t offset, struct fuse_file_info *fi){
+	printf("%s\n", "-------------------- READ");
+
+	int args_length = 5 + strlen(path) + 1 + sizeof(size_t) + sizeof(off_t);
+	int bytes_written;
+	char* msg = fill_in_basic_info(args_length, "read;", path, &bytes_written);//malloc(sizeof(int) + args_length); //
+	printf("Part of the message yall %s\n", msg + sizeof(int));
+
+	memcpy(msg + bytes_written+1, &size, sizeof(size_t));
+	memcpy(msg + bytes_written + 1 + sizeof(size_t), &offset, sizeof(off_t));
+
+	if(write(socket_fd, msg, args_length + sizeof(int)) <= 0) {
+		printf("Couldn't send message %s\n", strerror(errno));
+	}
+	
+	char* response = malloc(2*sizeof(int) + size);
+	assert(response != NULL);
+	if(read(socket_fd, response, 2*sizeof(int) + size) <= 0) {
+		printf("Couldn't receive response %s\n", strerror(errno));
+	}
+
+	int status, bytes_read;
+	memcpy(&status, response, sizeof(int));
+	memcpy(&bytes_read, response+sizeof(int), sizeof(int));
+	printf("Status is %d, bytes_read is %d\n", status, bytes_read);
+	if(status != 0 || bytes_read < 0) {
+		printf("%s\n", "Something's not right");
+		free(msg);
 		return -status;
 	}
 
-	int has_next;
-	char* dirname = malloc(MAX_DIR_NAME_LENGTH + 1);
-	assert(dirname != NULL);
-	char buffer[1024];
-	while(1) {
-		if(read(socket_fd, buffer, sizeof(int)) < 0) {
-			printf("Couldn't read has_next %s\n", strerror(errno));
-		}
-		memcpy(&has_next, buffer, sizeof(int));
-		printf("has_next = %d\n", has_next);
-
-		if(has_next == 0)
-			break;
-		
-		struct stat st;
-		if(read(socket_fd, &st, sizeof(struct stat)) < 0) {
-			printf("Couldn't read struct stat %s\n", strerror(errno));
-			free(dirname);
-			//TODO closedir or hotswap
-			return -errno;
-		}
-		print_stat(&st);
-
-		
-		if(read(socket_fd, dirname, MAX_DIR_NAME_LENGTH) < 0) {
-			printf("Couldn't read dirname %s\n", strerror(errno));
-			free(dirname);
-			//TODO closedir or hotswap
-			return -errno;
-		}
-		printf("%s\n", dirname);
-		//TODO: this check should send something to server, or server might block trying to send 
-		//some info, while client can no longer receive it, since its buffer is full
-		if (filler(buf, dirname, &st, 0)) //should last argument be nonzero?
-			break;
-	}
-	free(dirname);
+	memcpy(buf, response + 2*sizeof(int), bytes_read);
+	printf("%s\n", buf);
+	free(msg);
+	free(response);
 	return 0;
 }
 
 
-static int raid1_access(const char *path, int mask) {
-	printf("%s\n", "--------------------SYSCALL ACCESS");
-	log_msg(strcat("Syscall access; Path is ", path));
 
-	int num_bytes_to_send = 7 + strlen(path)+1 + sizeof(int);
-	if(write(socket_fd, &num_bytes_to_send, sizeof(int)) < 0) {
-		printf("%s\n", "Couldn't send num bytes");
-		log_error("GETATTR. Couldn't send num bytes", errno);
-		return -1;
+static int raid1_write(const char *path, const char *buf, size_t size, off_t offset, struct fuse_file_info *fi) {
+	printf("%s\n", "-------------------- WRITE");
+	int args_length = 6 + strlen(path) + 1 + sizeof(size_t) + sizeof(off_t) + size;
+	int bytes_written;
+
+	char* msg = fill_in_basic_info(args_length, "write;", path, &bytes_written);
+	printf("Part of the msg %s\n", msg + sizeof(int));
+
+	memcpy(msg + bytes_written+1, &size, sizeof(size_t));
+	memcpy(msg + bytes_written + 1 + sizeof(size_t), &offset, sizeof(off_t));
+	memcpy(msg + bytes_written + 1 + sizeof(size_t) + sizeof(off_t), buf, size);
+
+	if(write(socket_fd, msg, args_length + sizeof(int) + size) <= 0) {
+		printf("Couldn't send message %s\n", strerror(errno));
 	}
 
-	char msg[8 + MAX_PATH_LENGTH + sizeof(int)]; //access;path;mask\0
-	sprintf(msg, "%s;%s", "access", path);
-	int mask_arg = mask;
-	memcpy(msg + 8 + strlen(path), &mask_arg, sizeof(int));
-	printf("Sending %s\n", msg);
 
-	if(write(socket_fd, msg, num_bytes_to_send) < 0) {
-		printf("%s\n", "ACCESS: Couldn't send message to server!");
+	char* response = malloc(2*sizeof(int) + size);
+	assert(response != NULL);
+	if(read(socket_fd, response, 2*sizeof(int)) <= 0) {
+		printf("Couldn't receive response %s\n", strerror(errno));
 	}
 
-	char response [12];
-	if(read(socket_fd, response, strlen(response)) < 0) {
-		printf("%s\n", "ACCESS: Couldn't read response");
-		return -1;
+	int status, bytes_written_to_fd;
+	memcpy(&status, response, sizeof(int));
+	memcpy(&bytes_written_to_fd, response+sizeof(int), sizeof(int));
+	printf("Status is %d, bytes_written_to_fd is %d\n", status, bytes_written_to_fd);
+	if(status != 0 || bytes_written_to_fd < 0) {
+		free(msg);
+		return -status;
 	}
-	int res = atoi(response);
-	printf("Received result %d\n", res);
-	return -res;
+
+	free(msg);
+	free(response);
+	return 0;
 }
 
 
-// static int raid1_mkdir(const char* path, mode_t mode) {
-// 	printf("%s\n", "--------------------SYSCALL MKDIR");
-// 	// int res;
 
+static int raid1_mknod(const char *path, mode_t mode, dev_t rdev) {
+	printf("%s\n", "-------------------- MKNOD");
+
+	int args_length = 5 + strlen(path) + 1 + sizeof(size_t) + sizeof(off_t);
+	int bytes_written;
+	char* msg = fill_in_basic_info(args_length, "read;", path, &bytes_written);//malloc(sizeof(int) + args_length); //
+	printf("Part of the message yall %s\n", msg + sizeof(int));
+}
+
+// static int raid1_readdir(const char *path, void *buf, fuse_fill_dir_t filler, 
+// 		off_t offset, struct fuse_file_info *fi) 
+// {
+// 	printf("%s\n", "--------------------SYSCALL READDIR");
+// 	char* msg = malloc(21 + strlen(path)); //readdir  + ; + path + ; + offset + \0
+// 	assert(msg != NULL);
+// 	sprintf(msg, "%s;%s;%lu", "readdir", path, (size_t)offset);
 	
-
-// 	char syscall[6] = "mkdir";
-// 	if(write(socket_fd, syscall, strlen(syscall) + 1) < 0){
-// 		printf("Couldn't send syscall %s\n", strerror(errno));
-// 		return -1;
+// 	printf("READDIR: Going to send: %s\n", msg);
+// 	if(write(socket_fd, msg, strlen(msg) + 1) < 0) {
+// 		printf("%s\n", "READDIR: Couldn't send readdir message!");
 // 	}
+// 	free(msg);
 
-// 	if(write(socket_fd, path, strlen(path) + 1) < 0) {
-// 		printf("Couldn't send path %s\n", strerror(errno));
-// 		return -1;
-// 	}
-
-// 	if(write(socket_fd, &mode, sizeof(mode_t)) < 0){
-// 		printf("Couldn't send mode %s\n", strerror(errno));
-// 		return -1;
-// 	}
-
-// 	return 0;
-// }
-
-
-// static int raid1_rmdir(const char* path){
-// 	printf("%s\n", "--------------------SYSCALL RMDIR");
-// 	int res;
-
-// 	res = rmdir(path);
-// 	if (res == -1)
+// 	char status_str[12];
+// 	if(read(socket_fd, status_str, 12) < 0) {
+// 		printf("READDIR: %s\n", strerror(errno));
 // 		return -errno;
+// 	}
+// 	int status = atoi(status_str);
+// 	printf("Status is %s or %d\n", status_str, status);
+// 	if(status != 0) {
+// 		printf("READDIR: After opendir server sent %s\n", strerror(status));
+// 		return -status;
+// 	}
 
+// 	int has_next;
+// 	char* dirname = malloc(MAX_DIR_NAME_LENGTH + 1);
+// 	assert(dirname != NULL);
+// 	char buffer[1024];
+// 	while(1) {
+// 		if(read(socket_fd, buffer, sizeof(int)) < 0) {
+// 			printf("Couldn't read has_next %s\n", strerror(errno));
+// 		}
+// 		memcpy(&has_next, buffer, sizeof(int));
+// 		printf("has_next = %d\n", has_next);
+
+// 		if(has_next == 0)
+// 			break;
+		
+// 		struct stat st;
+// 		if(read(socket_fd, &st, sizeof(struct stat)) < 0) {
+// 			printf("Couldn't read struct stat %s\n", strerror(errno));
+// 			free(dirname);
+// 			//TODO closedir or hotswap
+// 			return -errno;
+// 		}
+// 		print_stat(&st);
+
+		
+// 		if(read(socket_fd, dirname, MAX_DIR_NAME_LENGTH) < 0) {
+// 			printf("Couldn't read dirname %s\n", strerror(errno));
+// 			free(dirname);
+// 			//TODO closedir or hotswap
+// 			return -errno;
+// 		}
+// 		printf("%s\n", dirname);
+// 		//TODO: this check should send something to server, or server might block trying to send 
+// 		//some info, while client can no longer receive it, since its buffer is full
+// 		if (filler(buf, dirname, &st, 0)) //should last argument be nonzero?
+// 			break;
+// 	}
+// 	free(dirname);
 // 	return 0;
 // }
+
+
+
+// static int raid1_access(const char *path, int mask) {
+// 	printf("%s\n", "--------------------SYSCALL ACCESS");
+// 	log_msg(strcat("Syscall access; Path is ", path));
+
+// 	int num_bytes_to_send = 7 + strlen(path)+1 + sizeof(int);
+// 	if(write(socket_fd, &num_bytes_to_send, sizeof(int)) < 0) {
+// 		printf("%s\n", "Couldn't send num bytes");
+// 		log_error("GETATTR. Couldn't send num bytes", errno);
+// 		return -1;
+// 	}
+
+// 	char msg[8 + MAX_PATH_LENGTH + sizeof(int)]; //access;path;mask\0
+// 	sprintf(msg, "%s;%s", "access", path);
+// 	int mask_arg = mask;
+// 	memcpy(msg + 8 + strlen(path), &mask_arg, sizeof(int));
+// 	printf("Sending %s\n", msg);
+
+// 	if(write(socket_fd, msg, num_bytes_to_send) < 0) {
+// 		printf("%s\n", "ACCESS: Couldn't send message to server!");
+// 	}
+
+// 	char response [12];
+// 	if(read(socket_fd, response, strlen(response)) < 0) {
+// 		printf("%s\n", "ACCESS: Couldn't read response");
+// 		return -1;
+// 	}
+// 	int res = atoi(response);
+// 	printf("Received result %d\n", res);
+// 	return -res;
+// }
+
+
+static int raid1_rename(const char* from, const char *to) {
+	printf("%s\n", "-------------------- RENAME");
+	int args_length = 7 + strlen(from)+ 1 + strlen(to)+1;
+	printf("Args length %d\n", args_length);
+
+	char* msg = malloc(sizeof(int) + args_length);
+	assert(msg != NULL);
+
+	memcpy(msg, &args_length, sizeof(int));
+	sprintf(msg + sizeof(int), "rename;%s", from);
+	printf("Part of message:%s\n", msg + sizeof(int));
+	sprintf(msg + sizeof(int) + 7 + strlen(from) + 1, "%s", to);
+	printf("Part of message:%s\n", msg + sizeof(int));
+	printf("Other part of message:%s\n", msg + sizeof(int) + 7 + strlen(from) + 1);
+
+
+	if(write(socket_fd, msg, sizeof(int) + args_length) <= 0) {
+		printf("%s\n", "Couldn't send message");
+	} 
+
+	int resp;
+	if(read(socket_fd, &resp, sizeof(int)) <= 0) {
+		printf("%s\n", "Couldn't read response");
+	}
+	printf("response is %d\n", resp);
+	return -resp;
+}
+
+
+
+
+
 
 
 // static int raid1_create(const char *path, mode_t mode, struct fuse_file_info *fi) {
@@ -298,7 +447,7 @@ static int raid1_access(const char *path, int mask) {
 
 // }
 
-static int raid1_mknod(const char *path, mode_t mode, dev_t rdev) {
+static int raid_mknod(const char *path, mode_t mode, dev_t rdev) {
 	// char buf[2048];
 	char* buf = malloc(8 + MAX_PATH_LENGTH + sizeof(mode_t) + sizeof(dev_t));
 	assert(buf != NULL);
@@ -322,66 +471,6 @@ static int raid1_mknod(const char *path, mode_t mode, dev_t rdev) {
 }
 
 
-
-static int raid1_open(const char *path, struct fuse_file_info *fi) {
-	printf("%s\n", "SYSCALL OPEN");
-	log_msg(strcat("Syscall open; Path is ", path));
-
-	int num_bytes_to_send = 5 + strlen(path)+1 + sizeof(int);
-	if(write(socket_fd, &num_bytes_to_send, sizeof(int)) < 0) {
-		printf("%s\n", "Couldn't send num bytes");
-		log_error("Couldn't send num bytes", errno);
-		return -1;
-	}
-
-	char buf [6 + MAX_PATH_LENGTH + sizeof(int)]; //open; + strlen + path + flags
-	sprintf(buf, "open;%s", path);
-	int flags = fi->flags; 
-	memcpy(buf + 5 + strlen(path) + 1, &flags, sizeof(int));
-	printf("flags are %d some part of buf is %s\n", flags, buf);
-
-	if(write(socket_fd, buf, 6 + strlen(path) + sizeof(int)) < 0) {
-		printf("%s\n", "Couldn't send path and flags");
-		log_error("OPEN sending path and flags.", errno);
-	}
-	sleep(0.2);
-
-	int resp;
-	if(read(socket_fd, &resp, sizeof(int)) < 0) {
-		printf("%s\n", "Couldn't read response");
-		log_error("OPEN readin servers response ", errno);
-	}
-
-	printf("Server response %d\n", resp);
-	// uint64_t fd = (uint64_t) open(path, fi->flags);
-	// fi->fh = fd;
-	// if (fd < 0)
-	// 	return -1;
-	return resp;
-}
-
-
-static int raid1_read(const char *path, char *buf, size_t size, off_t offset, struct fuse_file_info *fi){
-	printf("%s\n", "SYSCALL READ");
-	// int fd;
-	// int res;
-
-	// if(fi == NULL)
-	// 	fd = open(path, O_RDONLY);
-	// else
-	// 	fd = fi->fh;
-	
-	// if (fd == -1)
-	// 	return -errno;
-
-	// res = pread(fd, buf, size, offset);
-	// if (res == -1)
-	// 	res = -errno;
-
-	// if(fi == NULL)
-	// 	close(fd);
-	return 0;
-}
 
 
 static int split_address(const char* address, int* ip, int* port) {
