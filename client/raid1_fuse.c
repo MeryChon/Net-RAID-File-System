@@ -23,9 +23,10 @@ static int raid1_write(const char *path, const char *buf, size_t size, off_t off
 // static int raid1_create(const char *path, mode_t mode, struct fuse_file_info *fi);
 static int raid1_mkdir(const char* path, mode_t mode);
 static int raid1_rmdir(const char* path);
-// static int raid1_access(const char *path, int mask);
+static int raid1_access(const char *path, int mask);
 static int raid1_mknod(const char *path, mode_t mode, dev_t rdev);
 static int raid1_rename(const char* from, const char *to);
+static int raid1_utime(const char *path, struct utimbuf *ubuf);
 
 
 
@@ -43,8 +44,9 @@ struct fuse_operations raid1_operations = {
 	// .opendir	= raid1_opendir, 
 	// .releasedir = raid1_releasedir, 
 	// .create 	= raid1_create, 
-	// .access = raid1_access,
+	.access = raid1_access,
 	.mknod = raid1_mknod,
+	.utime = raid1_utime,
 };
 
 
@@ -220,8 +222,8 @@ static int raid1_read(const char *path, char *buf, size_t size, off_t offset, st
 	char* msg = fill_in_basic_info(args_length, "read;", path, &bytes_written);//malloc(sizeof(int) + args_length); //
 	printf("Part of the message yall %s\n", msg + sizeof(int));
 
-	memcpy(msg + bytes_written+1, &size, sizeof(size_t));
-	memcpy(msg + bytes_written + 1 + sizeof(size_t), &offset, sizeof(off_t));
+	memcpy(msg + bytes_written, &size, sizeof(size_t));
+	memcpy(msg + bytes_written + sizeof(size_t), &offset, sizeof(off_t));
 
 	if(write(socket_fd, msg, args_length + sizeof(int)) <= 0) {
 		printf("Couldn't send message %s\n", strerror(errno));
@@ -260,9 +262,9 @@ static int raid1_write(const char *path, const char *buf, size_t size, off_t off
 	char* msg = fill_in_basic_info(args_length, "write;", path, &bytes_written);
 	printf("Part of the msg %s\n", msg + sizeof(int));
 
-	memcpy(msg + bytes_written+1, &size, sizeof(size_t));
-	memcpy(msg + bytes_written + 1 + sizeof(size_t), &offset, sizeof(off_t));
-	memcpy(msg + bytes_written + 1 + sizeof(size_t) + sizeof(off_t), buf, size);
+	memcpy(msg + bytes_written, &size, sizeof(size_t));
+	memcpy(msg + bytes_written + sizeof(size_t), &offset, sizeof(off_t));
+	memcpy(msg + bytes_written + sizeof(size_t) + sizeof(off_t), buf, size);
 
 	if(write(socket_fd, msg, args_length + sizeof(int) + size) <= 0) {
 		printf("Couldn't send message %s\n", strerror(errno));
@@ -294,10 +296,45 @@ static int raid1_write(const char *path, const char *buf, size_t size, off_t off
 static int raid1_mknod(const char *path, mode_t mode, dev_t rdev) {
 	printf("%s\n", "-------------------- MKNOD");
 
-	int args_length = 5 + strlen(path) + 1 + sizeof(size_t) + sizeof(off_t);
+	int args_length = 6 + strlen(path) + 1 + sizeof(mode_t) + sizeof(dev_t);
 	int bytes_written;
-	char* msg = fill_in_basic_info(args_length, "read;", path, &bytes_written);//malloc(sizeof(int) + args_length); //
-	printf("Part of the message yall %s\n", msg + sizeof(int));
+	char* msg = fill_in_basic_info(args_length, "mknod;", path, &bytes_written);//malloc(sizeof(int) + args_length); //
+	printf("Part of the message %s\n", msg + sizeof(int));
+	printf("mode = %d, dev_t = %lu\n", mode, rdev);
+
+	memcpy(msg + bytes_written, &mode, sizeof(mode_t));
+	memcpy(msg + bytes_written + sizeof(mode_t), &rdev, sizeof(dev_t));
+
+	if(write(socket_fd, msg, bytes_written + sizeof(mode_t) + sizeof(dev_t)) <= 0) {
+		printf("Couldn't send message %s\n", strerror(errno));
+	}
+
+	int response;
+	if(read(socket_fd, &response, sizeof(int)) <= 0) {
+		printf("Couldn't receive response %s\n", strerror(errno));
+	}
+	printf("response=%d\n", response);
+	return -response;
+}
+
+
+static int raid1_utime(const char *path, struct utimbuf *ubuf) {
+	printf("%s\n", "-------------------- UTIME");
+	int args_length = 6 + strlen(path) + 1 + sizeof(struct utimbuf);
+	int bytes_written;
+	char* msg = fill_in_basic_info(args_length, "utime;", path, &bytes_written);//malloc(sizeof(int) + args_length); //
+	printf("Part of the message %s\n", msg + sizeof(int));
+
+	if(write(socket_fd, msg, bytes_written + sizeof(struct utimbuf)) <= 0) {
+		printf("Couldn't send message %s\n", strerror(errno));
+	}
+
+	int response;
+	if(read(socket_fd, &response, sizeof(int)) <= 0) {
+		printf("Couldn't receive response %s\n", strerror(errno));
+	}
+	printf("response %d\n", response);
+	return -response;
 }
 
 // static int raid1_readdir(const char *path, void *buf, fuse_fill_dir_t filler, 
@@ -368,8 +405,9 @@ static int raid1_mknod(const char *path, mode_t mode, dev_t rdev) {
 
 
 
-// static int raid1_access(const char *path, int mask) {
-// 	printf("%s\n", "--------------------SYSCALL ACCESS");
+static int raid1_access(const char *path, int mask) {
+	printf("%s\n", "--------------------SYSCALL ACCESS");
+	return 0;
 // 	log_msg(strcat("Syscall access; Path is ", path));
 
 // 	int num_bytes_to_send = 7 + strlen(path)+1 + sizeof(int);
@@ -397,7 +435,7 @@ static int raid1_mknod(const char *path, mode_t mode, dev_t rdev) {
 // 	int res = atoi(response);
 // 	printf("Received result %d\n", res);
 // 	return -res;
-// }
+}
 
 
 static int raid1_rename(const char* from, const char *to) {

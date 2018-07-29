@@ -14,6 +14,7 @@
 #include <arpa/inet.h>
 #include <assert.h>
 #include <fcntl.h>
+#include <utime.h>
 
 #define BACKLOG 10
 #define MAX_CLIENT_MSG_LENGTH 2048
@@ -303,6 +304,64 @@ static int write_handler (int client_sfd, char args[]) {
 }
 
 
+static int utime_handler (int client_sfd, char args[]) {
+	printf("%s\n", "--------------------UTIME HANDLER");
+	int path_length;
+	char* fpath = get_path_from_args(args, &path_length);
+	printf("%s\n", fpath);
+
+	struct utimbuf* ubuf = malloc(sizeof(struct utimbuf));
+	memcpy(ubuf, args + path_length + 1, sizeof(struct utimbuf));
+	int res;
+	int ret_val = 0;
+	res = utime(fpath, ubuf);
+	if(res == -1) {
+		ret_val = errno;
+	}
+	printf("utime ret_val %d\n", ret_val);
+
+	write(client_sfd, &ret_val, sizeof(int));
+	free(fpath);
+	free(ubuf);
+
+	return -ret_val;
+}
+
+
+static int mknod_handler (int client_sfd, char args[]) {
+	printf("%s\n", "--------------------MKNOD HANDLER");
+	int path_length;
+	char* fpath = get_path_from_args(args, &path_length);
+	printf("%s\n", fpath);
+
+	mode_t mode;
+	dev_t rdev;
+	memcpy(&mode, args+path_length+1, sizeof(mode_t));
+	printf("%s\n", "HERE");
+	memcpy(&rdev, args+path_length+1+sizeof(mode_t), sizeof(dev_t));
+	printf("mode = %d, dev_t = %lu\n", mode, rdev);
+
+	int res;
+	int ret_val = 0;
+	if (S_ISREG(mode)) {
+		res = open(fpath, O_CREAT | O_EXCL | O_WRONLY, mode);
+		if (res >= 0)
+			res = close(res);
+	} else if (S_ISFIFO(mode))
+		res = mkfifo(fpath, mode);
+	else
+		res = mknod(fpath, mode, rdev);
+	if (res == -1) {
+		ret_val = errno;
+	}
+	printf("returning %d\n", ret_val);
+	if(write(client_sfd, &ret_val, sizeof(int)) <= 0) {
+		printf("Couldn't send response %s\n", strerror(errno));
+	}
+	return -ret_val;
+}
+
+
 static int read_from_client(int client_sfd, char* syscall, char* args) {
 	char buf[MAX_CLIENT_MSG_LENGTH];
 	int bytes_read = read(client_sfd, buf, MAX_CLIENT_MSG_LENGTH);
@@ -361,6 +420,10 @@ static int client_handler(int client_sfd) {
 			read_handler(client_sfd, args);
 		} else if(strcmp(syscall, "write") == 0) {
 			write_handler(client_sfd, args);
+		} else if(strcmp(syscall, "mknod") == 0) {
+			mknod_handler(client_sfd, args);
+		} else if(strcmp(syscall, "utime") == 0) {
+			utime_handler(client_sfd, args);
 		}
 	}
 	free(syscall);
