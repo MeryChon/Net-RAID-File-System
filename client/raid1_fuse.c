@@ -240,17 +240,17 @@ static int raid1_read(const char *path, char *buf, size_t size, off_t offset, st
 	memcpy(&status, response, sizeof(int));
 	memcpy(&bytes_read, response+sizeof(int), sizeof(int));
 	printf("Status is %d, bytes_read is %d\n", status, bytes_read);
-	if(status != 0 || bytes_read < 0) {
+	if(bytes_read < 0) {
 		printf("%s\n", "Something's not right");
 		free(msg);
-		return -status;
+		return status;
 	}
 
 	memcpy(buf, response + 2*sizeof(int), bytes_read);
 	printf("%s\n", buf);
 	free(msg);
 	free(response);
-	return 0;
+	return bytes_read;
 }
 
 
@@ -284,12 +284,12 @@ static int raid1_write(const char *path, const char *buf, size_t size, off_t off
 	printf("Status is %d, bytes_written_to_fd is %d\n", status, bytes_written_to_fd);
 	if(status != 0 || bytes_written_to_fd < 0) {
 		free(msg);
-		return -status;
+		return status;
 	}
 
 	free(msg);
 	free(response);
-	return 0;
+	return bytes_written_to_fd;
 }
 
 

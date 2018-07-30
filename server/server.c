@@ -208,28 +208,28 @@ static int read_handler (int client_sfd, char args[]) {
     printf("size is %lu, offset is %lu\n", size, offset);
 
     int fd, res;
-	int ret_val = 0;
+	// int ret_val = 0;
 	int bytes_read = -1;
 	char* buf = malloc(size);
 	assert(buf != NULL);
 	fd = open(fpath, O_RDONLY);
 	if (fd == -1){
-		ret_val = errno;
+		res = -errno;
 		printf("fd is -1 %s\n", strerror(errno));
 	} else {
 		res = pread(fd, buf, size, offset);
 		if (res == -1) {
-			ret_val = errno;
+			res = errno;
 			printf("pread returned -1 %s\n", strerror(errno));
 		}
 		bytes_read = res;
 		close(fd);
 	}
-	printf("ret_val %d, bytes_read %d\n", ret_val, bytes_read);
+	printf("res %d, bytes_read %d\n", res, bytes_read);
 
 	char* response = malloc(2*sizeof(int) + size);
 	assert(response != NULL);
-	memcpy(response, &ret_val, sizeof(int));
+	memcpy(response, &res, sizeof(int));
 	memcpy(response + sizeof(int), &bytes_read, sizeof(int));
 	memcpy(response+2*sizeof(int), buf, size);
 	if(write(client_sfd, response, 2*sizeof(int) + size) <= 0) {
@@ -238,7 +238,7 @@ static int read_handler (int client_sfd, char args[]) {
 
 	free(buf);
 	free(response);
-	return -ret_val;
+	return res;
 }
 
 
@@ -275,27 +275,27 @@ static int write_handler (int client_sfd, char args[]) {
     memcpy(buf, args+path_length+1+sizeof(size_t)+sizeof(off_t), size);
 
     int fd, res;
-    int ret_val = 0;
+    // int ret_val = 0;
     int bytes_written = -1;
 
     fd = open(fpath, O_WRONLY);
 	if (fd == -1) {
-		ret_val = errno;
+		res = -errno;
 		printf("open returned -1 %s\n", strerror(errno));
 	} else {
 		res = pwrite(fd, buf, size, offset);
 		if (res == -1) {
-			ret_val = errno;
+			res = -errno;
 			printf("pwrite returned -1 %s\n", strerror(errno));
 		}
 		bytes_written = res;
 		close(fd);
 	}
-	printf("ret_val %d, bytes_written %d\n", ret_val, bytes_written);
+	printf("res %d, bytes_written %d\n", res, bytes_written);
 
 	char* response = malloc(2*sizeof(int));
 	assert(response != NULL);
-	memcpy(response, &ret_val, sizeof(int));
+	memcpy(response, &res, sizeof(int));
 	memcpy(response + sizeof(int), &bytes_written, sizeof(int));
 	if(write(client_sfd, response, 2*sizeof(int)) <= 0) {
 		printf("Couldn't send response %s\n", strerror(errno));
@@ -303,7 +303,7 @@ static int write_handler (int client_sfd, char args[]) {
 
 	free(response);
 	
-	return -ret_val;
+	return res;
 }
 
 
