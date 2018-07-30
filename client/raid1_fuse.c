@@ -15,7 +15,7 @@
 // #define MAX_PATH_LENGTH 200
 
 static int raid1_getattr(const char *path, struct stat *stbuf);
-// static int raid1_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi);
+static int raid1_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi);
 static int raid1_open(const char *path, struct fuse_file_info *fi);
 static int raid1_read(const char *path, char *buf, size_t size, off_t offset, struct fuse_file_info *fi);
 // static int raid1_opendir (const char* path, struct fuse_file_info* fi);
@@ -27,18 +27,19 @@ static int raid1_access(const char *path, int mask);
 static int raid1_mknod(const char *path, mode_t mode, dev_t rdev);
 static int raid1_rename(const char* from, const char *to);
 static int raid1_utime(const char *path, struct utimbuf *ubuf);
+static int raid1_unlink(const char *path);
 
 
 
 struct fuse_operations raid1_operations = {
 	.getattr	= raid1_getattr,
-	// .readdir	= raid1_readdir,
+	.readdir	= raid1_readdir,
 	.open		= raid1_open,
 	.read		= raid1_read,
 	.write 		= raid1_write, 
 	// .releasedir = raid1_releasedir,
 	.rename		= raid1_rename, 
-	// .unlink		= raid1_unlink, 
+	.unlink		= raid1_unlink, 
 	.mkdir		= raid1_mkdir, 
 	.rmdir		= raid1_rmdir, 
 	// .opendir	= raid1_opendir, 
@@ -314,6 +315,7 @@ static int raid1_mknod(const char *path, mode_t mode, dev_t rdev) {
 		printf("Couldn't receive response %s\n", strerror(errno));
 	}
 	printf("response=%d\n", response);
+	free(msg);
 	return -response;
 }
 
@@ -334,7 +336,87 @@ static int raid1_utime(const char *path, struct utimbuf *ubuf) {
 		printf("Couldn't receive response %s\n", strerror(errno));
 	}
 	printf("response %d\n", response);
+	free(msg);
 	return -response;
+}
+
+
+static int raid1_unlink(const char *path) {
+	printf("%s\n", "-------------------- UNLINK");
+	int args_length = 7 + strlen(path) + 1;
+	int bytes_written;
+	char* msg = fill_in_basic_info(args_length, "unlink;", path, &bytes_written);
+	printf("Part of the message %s\n", msg + sizeof(int));
+
+	if(write(socket_fd, msg, sizeof(int) + bytes_written) <= 0){
+		printf("Couldn't send message %s\n", strerror(errno));
+	}
+
+	int response;
+	if(read(socket_fd, &response, sizeof(int)) <= 0) {
+		printf("Couldn't receive response %s\n", strerror(errno));
+	}
+	printf("Response is %d\n", response);
+	return -response;
+}
+
+static int raid1_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
+		       off_t offset, struct fuse_file_info *fi)
+{
+	printf("%s\n", "-------------------- READDIR");
+	int args_length = 8 + strlen(path) + 1;
+	int bytes_written;
+	char* msg = fill_in_basic_info(args_length, "readdir;", path, &bytes_written);//malloc(sizeof(int) + args_length); //
+	printf("Part of the message %s\n", msg + sizeof(int));
+
+	if(write(socket_fd, msg, sizeof(int) + args_length) <= 0) {
+		printf("Couldn't send message %s\n", strerror(errno));
+	}
+
+	int status, bytes_to_read;
+	char* buffer = malloc(2 * sizeof(int));
+	assert(buffer != NULL);
+	if(read(socket_fd, buffer, sizeof(int)*2) <= 0){
+		printf("Couldn't receive response info %s\n", strerror(errno));
+	}
+	memcpy(&status, buffer, sizeof(int));
+	memcpy(&bytes_to_read, buffer+sizeof(int), sizeof(int));
+	printf("status=%d; bytes_to_read=%d\n", status, bytes_to_read);
+	sleep(0.5);
+	int bytes_read_on_iteration = (bytes_to_read < 1024) ? bytes_to_read : 1024;
+	if(status == 0) {
+		int bytes_received = 0;
+		buffer = realloc(buffer, bytes_to_read);
+		assert(buffer != NULL);
+		while(bytes_received < bytes_to_read) {
+			int nbr = read(socket_fd, buffer+bytes_received, bytes_read_on_iteration);
+			if(nbr < 0) {
+				printf("Couldn't receive response %s\n", strerror(errno));
+			}
+			bytes_received+=nbr;
+		}
+		printf("bytes_received=%d\n", bytes_received);
+
+		int i = 0;
+		char* dirname=malloc(MAX_PATH_LENGTH);
+		assert(dirname != NULL);
+		while(i < bytes_received) {
+			struct stat st;
+			memcpy(&st, buffer + i, sizeof(struct stat));
+			print_stat(&st);			
+			strcpy(dirname, buffer+i+sizeof(struct stat));
+			printf("%s\n", dirname);
+			i+=sizeof(struct stat)+strlen(dirname)+1;
+			printf("%d\n", i);
+			if((filler(buf, dirname, &st, 0)))
+				break;
+			printf("next iteration\n");
+		}
+	}
+
+	free(buffer);
+	free(msg);
+	return -status;
 }
 
 // static int raid1_readdir(const char *path, void *buf, fuse_fill_dir_t filler, 
@@ -485,28 +567,6 @@ static int raid1_rename(const char* from, const char *to) {
 
 // }
 
-static int raid_mknod(const char *path, mode_t mode, dev_t rdev) {
-	// char buf[2048];
-	char* buf = malloc(8 + MAX_PATH_LENGTH + sizeof(mode_t) + sizeof(dev_t));
-	assert(buf != NULL);
-
-	strcpy(buf, "mknod;");
-	strcpy(buf + 7, path);
-	mode_t mode_arg = mode;
-	memcpy(buf+7+strlen(path)+1, &mode_arg, sizeof(mode_t));
-	dev_t rdev_arg = rdev;
-	memcpy(buf+7+strlen(path)+1+sizeof(mode_t), &rdev_arg, sizeof(dev_t));
-
-	// char syscall[6] = "mknod";
-	// memcpy(buf, syscall, strlen(syscall));
-	int num_bytes_to_send = 8 + strlen(path) + sizeof(mode_t) + sizeof(dev_t);
-	if(write(socket_fd, buf, num_bytes_to_send) < 0) {
-		printf("Couldn't send info %s\n", strerror(errno));
-	}
-
-	free(buf);
-	return 0;
-}
 
 
 
