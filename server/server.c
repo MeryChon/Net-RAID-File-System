@@ -331,6 +331,38 @@ static int utime_handler (int client_sfd, char args[]) {
 }
 
 
+static int utimens_handler (int client_sfd, char args[]) {
+	printf("%s\n", "--------------------UTIMENS HANDLER");
+	int path_length;
+	char* fpath = get_path_from_args(args, &path_length);
+	printf("%s\n", fpath);
+
+	struct timespec ts[2];
+	memcpy(ts, args + path_length + 1, 2*sizeof(struct timespec));
+
+	printf("ts[0].tv_sec=%lu; ts[0].tv_nsec / 1000=%lu; ts[1].tv_sec=%lu; ts[1].tv_nsec / 1000=%lu\n", 
+		ts[0].tv_sec, ts[0].tv_nsec / 1000, ts[1].tv_sec, ts[1].tv_nsec / 1000);
+
+	int res;
+	struct timeval tv[2];
+
+	tv[0].tv_sec = ts[0].tv_sec;
+	tv[0].tv_usec = ts[0].tv_nsec / 1000;
+	tv[1].tv_sec = ts[1].tv_sec;
+	tv[1].tv_usec = ts[1].tv_nsec / 1000;
+
+	res = utimes(fpath, tv);
+	if (res == -1){
+		res = -errno;
+	}
+	printf("result is %d\n", res);
+	if(write(client_sfd, &res, sizeof(int))<= 0) {
+		printf("Couldn't send response %s\n", strerror(errno));
+	}
+	return res;
+}
+
+
 static int mknod_handler (int client_sfd, char args[]) {
 	printf("%s\n", "--------------------MKNOD HANDLER");
 	int path_length;
@@ -382,82 +414,107 @@ static int unlink_handler (int client_sfd, char args[]) {
 }
 
 
-static int readdir_handler (int client_sfd, char args[]) {
-	printf("%s\n", "--------------------READDIR HANDLER");
+static int truncate_handler (int client_sfd, char args[]) {
+	printf("%s\n", "--------------------TRUNCATE HANDLER");
 	int path_length;
 	char* fpath = get_path_from_args(args, &path_length);
 
-	DIR *dp;
-	struct dirent *de;
-	int status = 0;
+	off_t size;
+	memcpy(&size, args + path_length + 1, sizeof(off_t));
+	printf("size=%lu\n", size);
 
+	int res;
+
+	res = truncate(fpath, size);
+	if (res == -1)
+		res = -errno;
+
+	if(write(client_sfd, &res, sizeof(int)) <= 0) {
+		printf("Couldn't send response %s\n", strerror(errno));
+	}
+
+	return res;
+}
+
+static int readdir_handler (int client_sfd, char args[]) {
+	// printf("%s\n", "--------------------READDIR HANDLER");
+	// int path_length;
+	// char* fpath = get_path_from_args(args, &path_length);
+
+	// DIR *dp;
+	// struct dirent *de;
+	// int status = 0;	
+	// int num_structs = 0;
+
+	// dp = opendir(fpath);
+	// if (dp == NULL) {
+	// 	status = -errno;
+	// }
+	// printf("status=%d\n", status);
+
+	// /*int buf_size = (status == 0) ? (sizeof(int) + sizeof(struct stat) * 16) : sizeof(int);
+	// printf("buf_size=%d\n", buf_size);
+	// char* buf = malloc(buf_size);
+	// assert(buf!=NULL); 
+	// memcpy(buf, &status, sizeof(int));	*/
+
+	// if(status == 0) {
+	// 	int bytes_filled = 0;
+	// 	// int num_structs = 0;	
+	// 	printf("Size of struct stat %lu\n", sizeof(struct stat));
+	// 	while ( (status == 0) && ((de = readdir(dp)) != NULL) ) {
+	// 		/*if(bytes_filled >= buf_size) {
+	// 			buf_size *= 2;
+	// 			printf("Must realloc %d\n", buf_size);
+	// 			buf = realloc(buf, buf_size);
+	// 			if(buf == NULL) {
+	// 				printf("Couldn't realloc %s\n", strerror(errno));
+	// 				status = errno;
+	// 				break;
+	// 			}
+	// 		}	*/
+
+	// 		struct stat st;
+	// 		memset(&st, 0, sizeof(st));
+	// 		st.st_ino = de->d_ino;
+	// 		st.st_mode = de->d_type << 12;
+	// 		print_stat(&st);
+
+	// 		memcpy(buf + bytes_filled, &st, sizeof(struct stat));
+	// 		bytes_filled+=sizeof(struct stat);
+	// 		strcpy(buf + bytes_filled, de->d_name);
+	// 		printf("%s %lu\n", de->d_name, strlen(de->d_name));
+	// 		bytes_filled += strlen(de->d_name) + 1;
+	// 		num_structs++; //TODO: delete this variable
+	// 		printf("bytes_filled=%d; num_structs=%d\n", bytes_filled, num_structs);			
+	// 	}
+	// }
+
+
+
+	// printf("status=%d\n", status);
+	// printf("Total bytes filled in %d\n", bytes_filled);
+
+	// char* info = malloc(2 * sizeof(int));
+	// memcpy(info, &status, sizeof(int));
+	// memcpy(info + sizeof(int), &bytes_filled, sizeof(int));
+
+	// if(write(client_sfd, info, 2*sizeof(int)) <= 0) {
+	// 	printf("Couldn't send info %s\n", strerror(errno));
+	// }
+
+	// if(status == 0) {
+	// 	int bytes_sent = 0;
+	// 	while(bytes_sent < bytes_filled) {
+	// 		int nbs = write(client_sfd, buf+bytes_sent, 1024);
+	// 		bytes_sent += nbs;
+	// 	}
+	// 	printf("bytes_sent=%d\n", bytes_sent);
+	// }
 	
-
-	dp = opendir(fpath);
-	if (dp == NULL) {
-		status = errno;
-	}
-	printf("status=%d\n", status);
-
-
-	int buf_size = sizeof(struct stat) * 16;
-	char* buf = malloc(buf_size);
-	assert(buf!=NULL);
-
-	// memcpy(buf, &status, sizeof(int));	
-	int bytes_filled = 0;
-	int num_structs = 0;	//TODO: remove? for debug only?
-	printf("Size of struct stat %lu\n", sizeof(struct stat));
-	while ( (status == 0) && ((de = readdir(dp)) != NULL) ) {
-		if(bytes_filled >= buf_size) {
-			buf_size *= 2;
-			printf("Must realloc %d\n", buf_size);
-			buf = realloc(buf, buf_size);
-			if(buf == NULL) {
-				printf("Couldn't realloc %s\n", strerror(errno));
-				status = errno;
-				break;
-			}
-		}	
-
-		struct stat st;
-		memset(&st, 0, sizeof(st));
-		st.st_ino = de->d_ino;
-		st.st_mode = de->d_type << 12;
-		print_stat(&st);
-
-		memcpy(buf + bytes_filled, &st, sizeof(struct stat));
-		bytes_filled+=sizeof(struct stat);
-		strcpy(buf + bytes_filled, de->d_name);
-		printf("%s %lu\n", de->d_name, strlen(de->d_name));
-		bytes_filled += strlen(de->d_name) + 1;
-		num_structs++; //TODO: delete this variable
-		printf("bytes_filled=%d; num_structs=%d\n", bytes_filled, num_structs);			
-	}
-
-	printf("status=%d\n", status);
-	printf("Total bytes filled in %d\n", bytes_filled);
-
-	char* info = malloc(2 * sizeof(int));
-	memcpy(info, &status, sizeof(int));
-	memcpy(info + sizeof(int), &bytes_filled, sizeof(int));
-
-	if(write(client_sfd, info, 2*sizeof(int)) <= 0) {
-		printf("Couldn't send info %s\n", strerror(errno));
-	}
-
-	if(status == 0) {
-		int bytes_sent = 0;
-		while(bytes_sent < bytes_filled) {
-			int nbs = write(client_sfd, buf+bytes_sent, 1024);
-			bytes_sent += nbs;
-		}
-		printf("bytes_sent=%d\n", bytes_sent);
-	}
-	
-	free(info);
-	free(buf);
-	return -status;
+	// free(info);
+	// free(buf);
+	// return -status;
 }
 
 static int read_from_client(int client_sfd, char* syscall, char* args) {
@@ -526,6 +583,10 @@ static int client_handler(int client_sfd) {
 			readdir_handler(client_sfd, args);
 		} else if(strcmp(syscall, "unlink") == 0) {
 			unlink_handler(client_sfd, args);
+		} else if(strcmp(syscall, "truncate") == 0) {
+			truncate_handler(client_sfd, args);
+		} else if(strcmp(syscall, "utimens") == 0) {
+			utimens_handler(client_sfd, args);
 		}
 	}
 	free(syscall);
