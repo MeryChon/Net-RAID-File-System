@@ -416,63 +416,58 @@ static int raid1_truncate(const char *path, off_t size) {
 }
 
 
+
+
+
+static int read_server_response(int socket_fd, char* buffer, int* buffer_size) {
+	int total_bytes_read = 0;
+	int bytes_to_read = 2*sizeof(int);
+	int num_bytes_read;
+	int first = 1;
+	int status, bytes_to_read;
+
+	while(total_bytes_read < bytes_to_read) {
+		errno = 0;
+		if((num_bytes_read=read(socket_fd, buffer, 1024)) < 0) {
+			printf("Couldn't read from server %s\n", strerror(errno));
+		}
+		total_bytes_read += num_bytes_read;
+		if(num_bytes_read==0 && errno == 0) break;
+	}
+
+	printf("total_bytes_read=%d\n", total_bytes_read);
+}
+
+
+
 static int raid1_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 		       off_t offset, struct fuse_file_info *fi)
 {
-	// printf("%s\n", "-------------------------------- READDIR");
-	// int args_length = 8 + strlen(path) + 1;
-	// int bytes_written;
-	// char* msg = fill_in_basic_info(args_length, "readdir;", path, &bytes_written);//malloc(sizeof(int) + args_length); //
-	// printf("Part of the message %s\n", msg + sizeof(int));
+	printf("%s\n", "-------------------------------- READDIR");
+	int args_length = 8 + strlen(path) + 1;
+	int bytes_written;
+	char* msg = fill_in_basic_info(args_length, "readdir;", path, &bytes_written);
+	printf("Part of the message %s\n", msg + sizeof(int));
 
-	// if(write(socket_fd, msg, sizeof(int) + args_length) <= 0) {
-	// 	printf("Couldn't send message %s\n", strerror(errno));
-	// }
+	if(write(socket_fd, msg, sizeof(int) + args_length) <= 0) {
+		printf("Couldn't send message %s\n", strerror(errno));
+	}
 
-	// int status, bytes_to_read;
-	// char* buffer = malloc(2 * sizeof(int));
-	// assert(buffer != NULL);
-	// // if(read(socket_fd, buffer, sizeof(int)*2) <= 0){
-	// // 	printf("Couldn't receive response info %s\n", strerror(errno));
-	// // }
-	// // memcpy(&status, buffer, sizeof(int));
-	// // memcpy(&bytes_to_read, buffer+sizeof(int), sizeof(int));
-	// printf("status=%d; bytes_to_read=%d\n", status, bytes_to_read);
-	// sleep(0.5);
-	// int bytes_read_on_iteration = (bytes_to_read < 1024) ? bytes_to_read : 1024;
-	// if(status == 0) {
-	// 	int bytes_received = 0;
-	// 	buffer = realloc(buffer, bytes_to_read);
-	// 	assert(buffer != NULL);
-	// 	while(bytes_received < bytes_to_read) {
-	// 		int nbr = read(socket_fd, buffer+bytes_received, bytes_read_on_iteration);
-	// 		if(nbr < 0) {
-	// 			printf("Couldn't receive response %s\n", strerror(errno));
-	// 		}
-	// 		bytes_received+=nbr;
-	// 	}
-	// 	printf("bytes_received=%d\n", bytes_received);
+	int status, bytes_to_read;
+	int buffer_size = 2*sizeof(int) + 8*(sizeof(struct stat) + MAX_PATH_LENGTH);
+	char* resp = malloc(buffer_size);
+	assert(resp != NULL);
+	
+	int bytes_read = read_server_response(socket_fd, resp, &buffer_size);
+	memcpy(&status, resp, sizeof(int));
+	memcpy(&bytes_to_read, resp+sizeof(int), sizeof(int));
 
-	// 	int i = 0;
-	// 	char* dirname=malloc(MAX_PATH_LENGTH);
-	// 	assert(dirname != NULL);
-	// 	while(i < bytes_received) {
-	// 		struct stat st;
-	// 		memcpy(&st, buffer + i, sizeof(struct stat));
-	// 		print_stat(&st);			
-	// 		strcpy(dirname, buffer+i+sizeof(struct stat));
-	// 		printf("%s\n", dirname);
-	// 		i+=sizeof(struct stat)+strlen(dirname)+1;
-	// 		printf("%d\n", i);
-	// 		if((filler(buf, dirname, &st, 0)))
-	// 			break;
-	// 		printf("next iteration\n");
-	// 	}
-	// }
+	fill_buffer(buf, resp, bytes_to_read);
 
-	// free(buffer);
-	// free(msg);
-	// return -status;
+
+	free(msg);
+	free(buffer);
+	return -status;
 } 
 
 // static int raid1_readdir(const char *path, void *buf, fuse_fill_dir_t filler, 
