@@ -53,6 +53,7 @@ dkms.conf
 
 
 #test files
+*.txt
 hello.c
 test_config.txt
 
