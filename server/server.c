@@ -21,6 +21,7 @@
 #define MAX_ARGS_LENGTH 2000
 
 
+
 static void fullpath(char fpath[MAX_PATH_LENGTH], const char *path){
     strcpy(fpath, mountpoint);
     if(mountpoint[strlen(mountpoint) - 1] != '/' && path[0] != '/') {
@@ -207,28 +208,28 @@ static int read_handler (int client_sfd, char args[]) {
     printf("size is %lu, offset is %lu\n", size, offset);
 
     int fd, res;
-	int ret_val = 0;
+	// int ret_val = 0;
 	int bytes_read = -1;
 	char* buf = malloc(size);
 	assert(buf != NULL);
 	fd = open(fpath, O_RDONLY);
 	if (fd == -1){
-		ret_val = errno;
+		res = -errno;
 		printf("fd is -1 %s\n", strerror(errno));
 	} else {
 		res = pread(fd, buf, size, offset);
 		if (res == -1) {
-			ret_val = errno;
+			res = errno;
 			printf("pread returned -1 %s\n", strerror(errno));
 		}
 		bytes_read = res;
 		close(fd);
 	}
-	printf("ret_val %d, bytes_read %d\n", ret_val, bytes_read);
+	printf("res %d, bytes_read %d\n", res, bytes_read);
 
 	char* response = malloc(2*sizeof(int) + size);
 	assert(response != NULL);
-	memcpy(response, &ret_val, sizeof(int));
+	memcpy(response, &res, sizeof(int));
 	memcpy(response + sizeof(int), &bytes_read, sizeof(int));
 	memcpy(response+2*sizeof(int), buf, size);
 	if(write(client_sfd, response, 2*sizeof(int) + size) <= 0) {
@@ -237,7 +238,7 @@ static int read_handler (int client_sfd, char args[]) {
 
 	free(buf);
 	free(response);
-	return -ret_val;
+	return res;
 }
 
 
@@ -250,6 +251,8 @@ static char* get_path_from_args(char args[], int* path_length) {
 	assert(fpath != NULL);
 	fullpath(fpath, args);
     printf("Full path is %s length %lu\n", fpath, strlen(fpath));
+
+    *path_length = strlen(path);
 
     return fpath;
 }
@@ -272,27 +275,27 @@ static int write_handler (int client_sfd, char args[]) {
     memcpy(buf, args+path_length+1+sizeof(size_t)+sizeof(off_t), size);
 
     int fd, res;
-    int ret_val = 0;
+    // int ret_val = 0;
     int bytes_written = -1;
 
     fd = open(fpath, O_WRONLY);
 	if (fd == -1) {
-		ret_val = errno;
+		res = -errno;
 		printf("open returned -1 %s\n", strerror(errno));
 	} else {
 		res = pwrite(fd, buf, size, offset);
 		if (res == -1) {
-			ret_val = errno;
+			res = -errno;
 			printf("pwrite returned -1 %s\n", strerror(errno));
 		}
 		bytes_written = res;
 		close(fd);
 	}
-	printf("ret_val %d, bytes_written %d\n", ret_val, bytes_written);
+	printf("res %d, bytes_written %d\n", res, bytes_written);
 
 	char* response = malloc(2*sizeof(int));
 	assert(response != NULL);
-	memcpy(response, &ret_val, sizeof(int));
+	memcpy(response, &res, sizeof(int));
 	memcpy(response + sizeof(int), &bytes_written, sizeof(int));
 	if(write(client_sfd, response, 2*sizeof(int)) <= 0) {
 		printf("Couldn't send response %s\n", strerror(errno));
@@ -300,7 +303,7 @@ static int write_handler (int client_sfd, char args[]) {
 
 	free(response);
 	
-	return -ret_val;
+	return res;
 }
 
 
@@ -328,14 +331,46 @@ static int utime_handler (int client_sfd, char args[]) {
 }
 
 
-static int mknod_handler (int client_sfd, char args[]) {
-	printf("%s\n", "--------------------MKNOD HANDLER");
+static int utimens_handler (int client_sfd, char args[]) {
+	printf("%s\n", "--------------------UTIMENS HANDLER");
 	int path_length;
 	char* fpath = get_path_from_args(args, &path_length);
 	printf("%s\n", fpath);
 
+	struct timespec ts[2];
+	memcpy(ts, args + path_length + 1, 2*sizeof(struct timespec));
+
+	printf("ts[0].tv_sec=%lu; ts[0].tv_nsec / 1000=%lu; ts[1].tv_sec=%lu; ts[1].tv_nsec / 1000=%lu\n", 
+		ts[0].tv_sec, ts[0].tv_nsec / 1000, ts[1].tv_sec, ts[1].tv_nsec / 1000);
+
+	int res;
+	struct timeval tv[2];
+
+	tv[0].tv_sec = ts[0].tv_sec;
+	tv[0].tv_usec = ts[0].tv_nsec / 1000;
+	tv[1].tv_sec = ts[1].tv_sec;
+	tv[1].tv_usec = ts[1].tv_nsec / 1000;
+
+	res = utimes(fpath, tv);
+	if (res == -1){
+		res = -errno;
+	}
+	printf("result is %d\n", res);
+	if(write(client_sfd, &res, sizeof(int))<= 0) {
+		printf("Couldn't send response %s\n", strerror(errno));
+	}
+	return res;
+}
+
+
+static int mknod_handler (int client_sfd, char args[]) {
+	printf("%s\n", "--------------------MKNOD HANDLER");
+	int path_length;
+	char* fpath = get_path_from_args(args, &path_length);
+	
 	mode_t mode;
 	dev_t rdev;
+	printf("%s\n", fpath);
 	memcpy(&mode, args+path_length+1, sizeof(mode_t));
 	printf("%s\n", "HERE");
 	memcpy(&rdev, args+path_length+1+sizeof(mode_t), sizeof(dev_t));
@@ -360,6 +395,131 @@ static int mknod_handler (int client_sfd, char args[]) {
 	}
 	return -ret_val;
 }
+
+static int unlink_handler (int client_sfd, char args[]) {
+	printf("%s\n", "--------------------UNLINK HANDLER");
+	int path_length;
+	char* fpath = get_path_from_args(args, &path_length);
+
+	int res;
+	int ret_val = 0;
+	res = unlink(fpath);
+	if (res == -1)
+		ret_val = errno;
+
+	if(write(client_sfd, &ret_val, sizeof(int)) <= 0) {
+		printf("Couldn't send response %s\n", strerror(errno));
+	}
+	return -ret_val;
+}
+
+
+static int truncate_handler (int client_sfd, char args[]) {
+	printf("%s\n", "--------------------TRUNCATE HANDLER");
+	int path_length;
+	char* fpath = get_path_from_args(args, &path_length);
+
+	off_t size;
+	memcpy(&size, args + path_length + 1, sizeof(off_t));
+	printf("size=%lu\n", size);
+
+	int res;
+
+	res = truncate(fpath, size);
+	if (res == -1)
+		res = -errno;
+
+	if(write(client_sfd, &res, sizeof(int)) <= 0) {
+		printf("Couldn't send response %s\n", strerror(errno));
+	}
+
+	return res;
+}
+
+
+
+
+static int write_dir_info(char* buf, struct dirent *de, int* buffer_size, int* bytes_filled){
+	int dname_size = strlen(de->d_name)+1;
+	if(buffer_size < *bytes_filled + sizeof(struct stat) + dname_size) {
+		*buffer_size = 2*(*buffer_size);
+		buf = realloc(buf, *buffer_size);
+		if(buf == NULL) return -1;
+	}
+
+	struct stat st;
+	memset(&st, 0, sizeof(st));
+	st.st_ino = de->d_ino;
+	st.st_mode = de->d_type << 12;
+	print_stat(&st);
+	memcpy(buf+*bytes_filled, &st, sizeof(st));
+	printf("%s\n", de->d_name);
+	strcpy(buf+*bytes_filled + sizeof(st), de->d_name);
+
+	*bytes_filled += (sizeof(st) + dname_size);
+	printf("bytes_filled=%d\n", *bytes_filled);
+	return 0;
+}
+
+
+static int send_buffer(int client_sfd, char* buf, int num_bytes_to_send) {
+	int num_bytes_sent = 0;
+	while(num_bytes_sent < num_bytes_to_send) {
+		int sent;
+		if((sent=write(client_sfd, buf, 1024)) < 0)
+			break;
+		num_bytes_sent += sent;
+		printf("Bytes sent %d\n", sent);
+	}
+	return num_bytes_sent;
+}
+
+
+static int readdir_handler (int client_sfd, char args[]) {
+	printf("%s\n", "--------------------READDIR HANDLER");
+	int path_length;
+	char* fpath = get_path_from_args(args, &path_length);
+
+	DIR *dp;
+	struct dirent *de;
+	int status = 0;		
+
+	dp = opendir(fpath);
+	if (dp == NULL) {
+		status = -errno;
+	}
+	printf("status=%d\n", status);
+
+	int buf_size = 2*sizeof(int) + 8*(sizeof(struct stat) + MAX_PATH_LENGTH);
+	char* buf = malloc(buf_size);
+	assert(buf != NULL);
+	
+	memcpy(buf, &status, sizeof(int));
+
+	int bytes_filled = 2*sizeof(int);
+
+	if(status >= 0) {
+		while ((de = readdir(dp)) != NULL) {
+			if(write_dir_info(buf, de, &buf_size, &bytes_filled) < 0)  break;
+		}
+	}
+	printf("bytes_filled=%d\n", bytes_filled);
+	memcpy(buf + sizeof(int), &bytes_filled, sizeof(int));
+
+	int bytes_sent = send_buffer(client_sfd, buf, bytes_filled);
+	printf("Total bytes sent %d\n", bytes_sent);
+
+	if(bytes_sent < 0) {
+		printf("Couldn't send data\n");
+	}
+
+	free(buf);
+	return status;
+}
+
+
+
+
 
 
 static int read_from_client(int client_sfd, char* syscall, char* args) {
@@ -424,6 +584,14 @@ static int client_handler(int client_sfd) {
 			mknod_handler(client_sfd, args);
 		} else if(strcmp(syscall, "utime") == 0) {
 			utime_handler(client_sfd, args);
+		} else if(strcmp(syscall, "readdir") == 0) {
+			readdir_handler(client_sfd, args);
+		} else if(strcmp(syscall, "unlink") == 0) {
+			unlink_handler(client_sfd, args);
+		} else if(strcmp(syscall, "truncate") == 0) {
+			truncate_handler(client_sfd, args);
+		} else if(strcmp(syscall, "utimens") == 0) {
+			utimens_handler(client_sfd, args);
 		}
 	}
 	free(syscall);
