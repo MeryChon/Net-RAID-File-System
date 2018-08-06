@@ -441,7 +441,7 @@ static int truncate_handler (int client_sfd, char args[]) {
 
 static int write_dir_info(char* buf, struct dirent *de, int* buffer_size, int* bytes_filled){
 	int dname_size = strlen(de->d_name)+1;
-	if(buffer_size < *bytes_filled + sizeof(struct stat) + dname_size) {
+	if(*buffer_size < *bytes_filled + sizeof(struct stat) + dname_size) {
 		*buffer_size = 2*(*buffer_size);
 		buf = realloc(buf, *buffer_size);
 		if(buf == NULL) return -1;
