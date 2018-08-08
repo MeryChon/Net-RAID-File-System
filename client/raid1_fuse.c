@@ -419,23 +419,37 @@ static int raid1_truncate(const char *path, off_t size) {
 
 
 
-static int read_server_response(int socket_fd, char* buffer, int* buffer_size) {
-	int total_bytes_read = 0;
-	int bytes_to_read = 2*sizeof(int);
-	int num_bytes_read;
-	int first = 1;
-	int status, bytes_to_read;
 
-	while(total_bytes_read < bytes_to_read) {
-		errno = 0;
-		if((num_bytes_read=read(socket_fd, buffer, 1024)) < 0) {
+//alloc resp here and write status, st and dirname into it on each iteration. also pass buf
+//in order to call filler here as well. 
+static int read_server_response(int socket_fd, char* resp, int* resp_size, char* buf) {
+	int total_bytes_read = 0;
+	int status = 0;
+	int num_bytes_read;
+
+	while(status >= 0) {
+		if((num_bytes_read=read(socket_fd, resp, resp_size)) < 0) {
 			printf("Couldn't read from server %s\n", strerror(errno));
 		}
+		printf("num_bytes_read=%d\n", num_bytes_read);
+		memcpy(&status, resp, sizeof(int));
+		printf("status=%d\n", status);
+
+		if(status < 0) break;
+		struct stat st;
+		memcpy(&st, resp + sizeof(int), sizeof(st));
+		char* dirname = malloc(MAX_PATH_LENGTH);
+		strcpy(dirname, resp+sizeof(int)+sizeof(st));
+		printf("dirname is %s\n", dirname);
+		if (filler(buf, dirname, &st, 0))
+			break;
+
 		total_bytes_read += num_bytes_read;
-		if(num_bytes_read==0 && errno == 0) break;
 	}
 
+
 	printf("total_bytes_read=%d\n", total_bytes_read);
+	return total_bytes_read;
 }
 
 
@@ -453,14 +467,13 @@ static int raid1_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 		printf("Couldn't send message %s\n", strerror(errno));
 	}
 
-	int status, bytes_to_read;
-	int buffer_size = 2*sizeof(int) + 8*(sizeof(struct stat) + MAX_PATH_LENGTH);
-	char* resp = malloc(buffer_size);
+	int status;
+	int resp_size = sizeof(int) + sizeof(struct stat) + MAX_PATH_LENGTH + 1;
+	char* resp = malloc(resp_size);
 	assert(resp != NULL);
 	
-	int bytes_read = read_server_response(socket_fd, resp, &buffer_size);
+	int bytes_read = read_server_response(socket_fd, resp, &resp_size);
 	memcpy(&status, resp, sizeof(int));
-	memcpy(&bytes_to_read, resp+sizeof(int), sizeof(int));
 
 	fill_buffer(buf, resp, bytes_to_read);
 
