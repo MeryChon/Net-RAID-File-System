@@ -478,6 +478,7 @@ static int send_buffer(int client_sfd, char* buf, int num_bytes_to_send) {
 static int send_dir_info(int cfd, int status, struct stat* st, char* dirname) {
 	int buffer_size = sizeof(int) + sizeof(st) + strlen(dirname) + 1;
 	printf("buffer_size=%d\n", buffer_size);
+	printf("dirname is %s\n", dirname);
 	// int diname_length = strlen(dirname);
 	char* buf = malloc(buffer_size);
 	assert(buf!=NULL);

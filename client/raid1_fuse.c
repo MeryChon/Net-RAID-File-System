@@ -422,13 +422,13 @@ static int raid1_truncate(const char *path, off_t size) {
 
 //alloc resp here and write status, st and dirname into it on each iteration. also pass buf
 //in order to call filler here as well. 
-static int read_server_response(int socket_fd, char* resp, int* resp_size, char* buf) {
+static int read_server_response(int socket_fd, char* resp, int* resp_size, char* buf, fuse_fill_dir_t filler) {
 	int total_bytes_read = 0;
 	int status = 0;
 	int num_bytes_read;
 
 	while(status >= 0) {
-		if((num_bytes_read=read(socket_fd, resp, resp_size)) < 0) {
+		if((num_bytes_read=read(socket_fd, resp, *resp_size)) < 0) {
 			printf("Couldn't read from server %s\n", strerror(errno));
 		}
 		printf("num_bytes_read=%d\n", num_bytes_read);
@@ -472,14 +472,15 @@ static int raid1_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 	char* resp = malloc(resp_size);
 	assert(resp != NULL);
 	
-	int bytes_read = read_server_response(socket_fd, resp, &resp_size);
+	int bytes_read = read_server_response(socket_fd, resp, &resp_size, buf, filler);
+	printf("read_server_response returned %d\n", bytes_read);
 	memcpy(&status, resp, sizeof(int));
 
-	fill_buffer(buf, resp, bytes_to_read);
+	// fill_buffer(buf, resp, bytes_to_read);
 
 
 	free(msg);
-	free(buffer);
+	// free(buf);
 	return -status;
 } 
 
