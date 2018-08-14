@@ -52,7 +52,7 @@ static int getattr_handler(int client_sfd, char path[]) {
 
     struct stat* stbuf = malloc(sizeof(struct stat));
     assert(stbuf != NULL);
-    int res = stat(fpath, stbuf);
+    int res = lstat(fpath, stbuf);
   	int ret_val = 0;
     if(res == -1) {
     	ret_val = errno;
@@ -67,7 +67,7 @@ static int getattr_handler(int client_sfd, char path[]) {
     if(write(client_sfd, response, sizeof(int) + sizeof(struct stat)) < 0) {
     	printf("Couldn't send response %s\n", strerror(errno));
     }
-    printf("Response is %d\n", ret_val);
+    printf("Response ret_val = %d\n", ret_val);
 
 	return -ret_val;
 }
@@ -462,6 +462,8 @@ static int write_dir_info(char* buf, struct dirent *de, int* buffer_size, int* b
 }
 
 
+
+
 static int send_buffer(int client_sfd, char* buf, int num_bytes_to_send) {
 	int num_bytes_sent = 0;
 	while(num_bytes_sent < num_bytes_to_send) {
@@ -473,6 +475,8 @@ static int send_buffer(int client_sfd, char* buf, int num_bytes_to_send) {
 	}
 	return num_bytes_sent;
 }
+
+
 
 
 static int send_dir_info(int cfd, int status, struct stat* st, char* dirname) {
@@ -493,84 +497,90 @@ static int send_dir_info(int cfd, int status, struct stat* st, char* dirname) {
 	return buffer_size;
 }
 
-static int readdir_handler(int client_sfd, char args[]) {
+
+
+
+
+static int readdir_handler (int client_sfd, char args[]) {
 	printf("%s\n", "--------------------READDIR HANDLER");
 	int path_length;
 	char* fpath = get_path_from_args(args, &path_length);
 
 	DIR *dp;
 	struct dirent *de;
-	int status = 0;		
+	int status = 0;
+
+	
 
 	dp = opendir(fpath);
 	if (dp == NULL) {
-		status = -errno;
+		status = errno;
 	}
 	printf("status=%d\n", status);
 
 
+	int buf_size = sizeof(struct stat) * 16;
+	char* buf = malloc(buf_size);
+	assert(buf!=NULL);
 
-	if(status >= 0) {
-		while ((de = readdir(dp)) != NULL) {
-			struct stat st;
-			memset(&st, 0, sizeof(st));
-			st.st_ino = de->d_ino;
-			st.st_mode = de->d_type << 12;
-			
-			send_dir_info(client_sfd, status, &st, de->d_name);
-		}
+	// memcpy(buf, &status, sizeof(int));	
+	int bytes_filled = 0;
+	int num_structs = 0;	//TODO: remove? for debug only?
+	printf("Size of struct stat %lu\n", sizeof(struct stat));
+	while ( (status == 0) && ((de = readdir(dp)) != NULL) ) {
+		if(bytes_filled >= buf_size) {
+			buf_size *= 2;
+			printf("Must realloc %d\n", buf_size);
+			buf = realloc(buf, buf_size);
+			if(buf == NULL) {
+				printf("Couldn't realloc %s\n", strerror(errno));
+				status = errno;
+				break;
+			}
+		}	
+
+		struct stat st;
+		memset(&st, 0, sizeof(st));
+		st.st_ino = de->d_ino;
+		st.st_mode = de->d_type << 12;
+		print_stat(&st);
+
+		memcpy(buf + bytes_filled, &st, sizeof(struct stat));
+		bytes_filled+=sizeof(struct stat);
+		strcpy(buf + bytes_filled, de->d_name);
+		printf("%s %lu\n", de->d_name, strlen(de->d_name));
+		bytes_filled += strlen(de->d_name) + 1;
+		num_structs++; //TODO: delete this variable
+		printf("bytes_filled=%d; num_structs=%d\n", bytes_filled, num_structs);			
 	}
 
-	status = -1;
-	if(write(client_sfd, &status, sizeof(int)) <= 0) {
-		printf("%s\n", strerror(errno));
-	} // Indicates that no more dirents's will be sent
+	printf("status=%d\n", status);
+	printf("Total bytes filled in %d\n", bytes_filled);
 
-	return status;
+	char* info = malloc(2 * sizeof(int));
+	memcpy(info, &status, sizeof(int));
+	memcpy(info + sizeof(int), &bytes_filled, sizeof(int));
+
+	if(write(client_sfd, info, 2*sizeof(int)) <= 0) {
+		printf("Couldn't send info %s\n", strerror(errno));
+	}
+
+	if(status == 0) {
+		int bytes_sent = 0;
+		int nbs = write(client_sfd, buf, bytes_filled);
+		// while(bytes_sent < bytes_filled) {
+		// 	int nbs = write(client_sfd, buf+bytes_sent, 1024);
+		// 	bytes_sent += nbs;
+		// }
+		printf("bytes_sent=%d\n", nbs);
+	}
+	
+	free(info);
+	free(buf);
+	return -status;
 }
 
 
-// static int readdir_handler (int client_sfd, char args[]) {
-// 	printf("%s\n", "--------------------READDIR HANDLER");
-// 	int path_length;
-// 	char* fpath = get_path_from_args(args, &path_length);
-
-// 	DIR *dp;
-// 	struct dirent *de;
-// 	int status = 0;		
-
-// 	dp = opendir(fpath);
-// 	if (dp == NULL) {
-// 		status = -errno;
-// 	}
-// 	printf("status=%d\n", status);
-
-// 	int buf_size = 2*sizeof(int) + 8*(sizeof(struct stat) + MAX_PATH_LENGTH);
-// 	char* buf = malloc(buf_size);
-// 	assert(buf != NULL);
-	
-// 	memcpy(buf, &status, sizeof(int));
-
-// 	int bytes_filled = 2*sizeof(int);
-
-// 	if(status >= 0) {
-// 		while ((de = readdir(dp)) != NULL) {
-// 			if(write_dir_info(buf, de, &buf_size, &bytes_filled) < 0)  break;
-// 		}
-// 	}
-// 	printf("bytes_filled=%d\n", bytes_filled);
-// 	memcpy(buf + sizeof(int), &bytes_filled, sizeof(int));
-
-// 	int bytes_sent = send_buffer(client_sfd, buf, bytes_filled);
-// 	printf("Total bytes sent %d\n", bytes_sent);
-
-// 	if(bytes_sent < 0) {
-// 		printf("Couldn't send data\n");
-// 	}
-
-// 	free(buf);
-// 	return status;
-// }
 
 
 
@@ -583,8 +593,8 @@ static int read_from_client(int client_sfd, char* syscall, char* args) {
 	if(bytes_read < 0) {
 		return -1;
 	}
-	printf("Bytes read %d\n", bytes_read);
-	printf("Buffer is %s\n", buf + sizeof(int));
+	// printf("Bytes read %d\n", bytes_read);
+	// printf("Buffer is %s\n", buf + sizeof(int));
 
 	int info_length;
 	memcpy(&info_length, buf, sizeof(int));
@@ -592,15 +602,13 @@ static int read_from_client(int client_sfd, char* syscall, char* args) {
 	char* info = malloc(info_length + 1);
 	assert(info != NULL);
 	memcpy(info, buf+sizeof(int), info_length);
-	// buf[sizeof(int)+info_length] = '\0';
-	// printf("the rest of the buffer %s\n", buf + sizeof(int));
 
 	strcpy(syscall, strtok(buf + sizeof(int), ";"));
 	assert(syscall != NULL);
-	printf("Syscall is %s\n", syscall);
+	// printf("Syscall is %s\n", syscall);
 	memcpy(args, strtok(NULL, ";"), info_length - strlen(syscall) - 1);
 	// memcpy(args, buf + sizeof(int) + strlen(syscall) + 1, info_length - (sizeof(int) + strlen(syscall)));
-	printf("args %s\n", args);
+	// printf("args %s\n", args);
 	// printf("Bytes read %d\n", bytes_read);
 	return bytes_read;
 }
