@@ -5,8 +5,10 @@
 
 #include <assert.h>
 #include <string.h>
-
+#include <errno.h>
 #include "log.h"
+
+#include<unistd.h>
 
 static void parse_client_info(char* line);
 static char* substring(char* string, int start, int end);
@@ -115,7 +117,7 @@ static char* substring(char* string, int start, int end) {
 
 
 
-static void parse_config_file(const char* config_file_path){
+static int parse_config_file(const char* config_file_path){
 	FILE* config_file = fopen(config_file_path, "r");
 	if(config_file) {
 		char* curr_line = malloc(sizeof(char)*MAX_LINE_LENGTH);  //free
@@ -146,6 +148,9 @@ static void parse_config_file(const char* config_file_path){
 		}
 
 		fclose(config_file);
+		return 0;
+	} else {
+		return -1;
 	}
 }
 
@@ -154,9 +159,20 @@ static int start(const char* program_name) {
 	int i = 0;
 	for(; i<num_storages; i++) {
 		struct disk_info storage_info = raids[i];
-		if(storage_info.raid == RAID_1) {
-			return raid1_fuse_main(program_name, client_info, storage_info);
-		}
+		printf("Next disk %d is RAID%d\n", i, storage_info.raid);
+		switch(fork()) {
+            case -1:
+                exit(100);
+            case 0:
+            	if(storage_info.raid == RAID_1) {
+					return raid1_fuse_main(program_name, client_info, storage_info);
+				} else {
+					printf("%s\n", "RAID5 Not yet implemented, sorry...");
+					exit(0);
+				}
+            default:
+                continue;	
+        }	
 	}
 	return 0;
 }
@@ -166,7 +182,10 @@ int main(int argc, char const *argv[]) {
 	const char* config_file_path = argv[1];
 	raids = malloc(MAX_NUM_RAIDS * sizeof(struct disk_info));
 	assert(raids != NULL); 
-	parse_config_file(config_file_path); 
+	if(parse_config_file(config_file_path) < 0) {
+		printf("%s\n", strerror(errno));
+		exit(-1);
+	} 
 	//if (configfile)
 	set_log_file(client_info.errorlog_path);
 	return start(argv[0]);	

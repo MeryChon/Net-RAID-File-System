@@ -37,8 +37,10 @@
 
 
 const char *raid1_root;
-struct sockaddr_in server_addr;
+struct sockaddr_in* server_addrs;
 int socket_fd;
+int* server_sfds;
+
 
 int raid1_fuse_main(const char* process_name, struct meta_info client_info, struct disk_info storage_info);
 
