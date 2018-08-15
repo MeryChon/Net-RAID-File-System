@@ -160,19 +160,26 @@ static int start(const char* program_name) {
 	for(; i<num_storages; i++) {
 		struct disk_info storage_info = raids[i];
 		printf("Next disk %d is RAID%d\n", i, storage_info.raid);
-		switch(fork()) {
-            case -1:
-                exit(100);
-            case 0:
-            	if(storage_info.raid == RAID_1) {
-					return raid1_fuse_main(program_name, client_info, storage_info);
-				} else {
-					printf("%s\n", "RAID5 Not yet implemented, sorry...");
-					exit(0);
-				}
-            default:
-                continue;	
-        }	
+		if(storage_info.raid == RAID_1) {
+			if(raid1_fuse_main(program_name, client_info, storage_info) < 0) {
+				return -1;
+			}
+		} else {
+			printf("%s\n", "RAID5 Not yet implemented, sorry...");
+		}
+		// switch(fork()) {
+  //           case -1:
+  //               exit(100);
+  //           case 0:
+  //           	if(storage_info.raid == RAID_1) {
+		// 			return raid1_fuse_main(program_name, client_info, storage_info);
+		// 		} else {
+		// 			printf("%s\n", "RAID5 Not yet implemented, sorry...");
+		// 			exit(0);
+		// 		}
+  //           default:
+  //               continue;	
+  //       }	
 	}
 	return 0;
 }
