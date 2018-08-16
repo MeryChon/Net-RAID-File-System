@@ -70,17 +70,14 @@ static char* fill_in_basic_info (int args_length, const char* syscall, const cha
 	int bytes_written = 0;
 	int n = args_length;
 
-	printf("in fill_in_basic_info args_length=%d\n", n);
 	memcpy(buf, &n, sizeof(int));
 	bytes_written += sizeof(int);
-	printf("bytes_written=%d\n", bytes_written);
 	printf("args length %d\n", args_length);
 	strcpy(buf + bytes_written, syscall);
 	bytes_written += strlen(syscall);
 	printf("bytes_written=%d\n", bytes_written);
 	strcpy(buf + bytes_written, path);
 	bytes_written += strlen(path) + 1;
-	printf("Part of the buf %s\n", buf + sizeof(int));
 	*num_bytes_written = bytes_written;
 	
 	return buf;
@@ -89,15 +86,31 @@ static char* fill_in_basic_info (int args_length, const char* syscall, const cha
 
 int raid1_releasedir(const char *path, struct fuse_file_info *fi)
 {
-    printf("----  releasedir : %s\n", path);
+    // printf("----  releasedir : %s\n", path);
 
-    int retstat = 0;
+    // int retstat = 0;
     
-    closedir((DIR *) (uintptr_t) fi->fh);
+    // closedir((DIR *) (uintptr_t) fi->fh);
     
-    return retstat;
+    return 0;
 }
 
+
+static int write_to_servers(char* msg, int size) {
+	int i;
+	for(i=0; i<num_servers; i++) {
+		write_results[i] = -1;
+		time_t start = time(NULL);	
+		do {
+			write_results[i] = write(server_sfds[i], msg, size);
+		} while(write_results[i] < 0 && (difftime(time(NULL), start) <= timeout));			
+
+		if(write_results[i] < 0) {
+			printf("%s\n", "tavzeit dzala araa");
+			log_error("Couldn't send data to server", errno);
+		}
+	}
+}
 
 static int raid1_getattr(const char *path, struct stat *stbuf) {
 	// printf("%s\n", "-------------------------------- GETATTR");
@@ -123,8 +136,6 @@ static int raid1_getattr(const char *path, struct stat *stbuf) {
 	if((n = write(socket_fd, msg, args_length + sizeof(int))) < 0) {
 		printf("%s\n", "Gotta retry");
 	}
-	// printf("Part of the message %s\n", msg + sizeof(int));
-	// printf("Written bytes %d\n", n);
 	free(msg);
 
 	//---------- receiving response -----------------
@@ -684,13 +695,55 @@ static int split_address(const char* address, int* ip, int* port) {
 }
 
 
-static int create_socket_connection(char* address_str, int timeout, int* sfd_ptr, 
-																struct sockaddr_in* server_address) {
-	int ip, port;
-	(void) sfd_ptr;
+// static int create_socket_connection(char* address_str, int timeout, int* sfd_ptr, 
+// 																struct sockaddr_in* server_address) {
+// 	int ip, port;
+// 	(void) sfd_ptr;
 	
-	socket_fd = socket(AF_INET, SOCK_STREAM, 0);
-	if(socket_fd < 0) {
+// 	socket_fd = socket(AF_INET, SOCK_STREAM, 0);
+// 	if(socket_fd < 0) {
+// 		log_error("Couldn't acquire endpoint file descriptor", errno);
+// 		return -1;
+// 	}
+
+// 	if(split_address(address_str, &ip, &port) < 0){
+// 		log_error("Malformed server address", errno);
+// 		return -1; //special error code?
+// 	}
+
+// 	server_address->sin_family = AF_INET;
+// 	server_address->sin_port = htons(port);
+// 	server_address->sin_addr.s_addr = ip;
+
+// 	int conn_status = -1;
+// 	time_t start = time(NULL);
+	
+// 	while(conn_status < 0 && (difftime(time(NULL), start) <= timeout)) {
+// 		log_msg("Trying to connect to server");
+// 		printf("%s\n", "Trying to connect to server");
+// 		conn_status = connect(socket_fd, (struct sockaddr*)server_address, sizeof(*server_address));
+// 		if(conn_status < 0) {
+// 			sleep(2);
+// 		}
+// 	}
+
+// 	if(conn_status < 0) {
+// 		log_error("Couldn't connect to server", errno);
+// 		printf("%s %s\n", "Couldn't connect to server ", address_str);
+// 		//do hot swap
+// 		return -1;
+// 	}
+// 	printf("%s %s\n", "Connected to", address_str);
+// 	log_connection(address_str);
+
+// 	return 0;
+// }
+
+static int create_socket_connection(char* address_str, int timeout, int server_index) {
+	int ip, port;
+	
+	server_sfds[server_index] = socket(AF_INET, SOCK_STREAM, 0);
+	if(server_sfds[server_index] < 0) {
 		log_error("Couldn't acquire endpoint file descriptor", errno);
 		return -1;
 	}
@@ -700,9 +753,9 @@ static int create_socket_connection(char* address_str, int timeout, int* sfd_ptr
 		return -1; //special error code?
 	}
 
-	server_address->sin_family = AF_INET;
-	server_address->sin_port = htons(port);
-	server_address->sin_addr.s_addr = ip;
+	server_addrs[server_index].sin_family = AF_INET;
+	server_addrs[server_index].sin_port = htons(port);
+	server_addrs[server_index].sin_addr.s_addr = ip;
 
 	int conn_status = -1;
 	time_t start = time(NULL);
@@ -710,7 +763,7 @@ static int create_socket_connection(char* address_str, int timeout, int* sfd_ptr
 	while(conn_status < 0 && (difftime(time(NULL), start) <= timeout)) {
 		log_msg("Trying to connect to server");
 		printf("%s\n", "Trying to connect to server");
-		conn_status = connect(socket_fd, (struct sockaddr*)server_address, sizeof(*server_address));
+		conn_status = connect(server_sfds[server_index], (struct sockaddr*)(&server_addrs[server_index]), sizeof(server_addrs[server_index]));
 		if(conn_status < 0) {
 			sleep(2);
 		}
@@ -729,12 +782,23 @@ static int create_socket_connection(char* address_str, int timeout, int* sfd_ptr
 }
 
 
+
 int raid1_fuse_main(const char* process_name, struct meta_info client_info,
 																	 struct disk_info storage_info) {
 	raid1_root = strdup(storage_info.mountpoint);
+	num_servers = storage_info.num_servers;
+	server_sfds = malloc(sizeof(int) * num_servers);
+	assert(server_sfds != NULL);
+	server_addrs = malloc(sizeof(struct sockaddr_in) * num_servers);
+	assert(server_addrs != NULL);
+	write_results = malloc(sizeof(int) * num_servers);
+	assert(write_results != NULL);
+	timeout = client_info.timeout;
+
+	int server_index = 0;
 	int i = 0;
 	for(;i < storage_info.num_servers; i++) {
-		if(create_socket_connection(storage_info.servers[i], client_info.timeout, &socket_fd, &server_addr) != 0) {
+		if(create_socket_connection(storage_info.servers[i], client_info.timeout, server_index++) != 0) {
 			printf("%s\n", "Need hot swap");
 		}
 	}
