@@ -44,6 +44,7 @@ int num_servers;
 int* server_sfds;
 int* write_results;
 int* read_results;
+int* active_servers;
 int timeout;
 
 int raid1_fuse_main(const char* process_name, struct meta_info client_info, struct disk_info storage_info);

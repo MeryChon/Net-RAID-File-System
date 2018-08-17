@@ -84,6 +84,53 @@ static char* fill_in_basic_info (int args_length, const char* syscall, const cha
 }
 
 
+
+static int send_to_all_servers(char* msg, int size) {
+	int i, res;
+	res = -1;
+	for(i=0; i<num_servers; i++) {
+		write_results[i] = -1;
+		time_t start = time(NULL);	
+		do {
+			write_results[i] = write(server_sfds[i], msg, size);
+			printf("Server N %d, write_result = %d\n", i, write_results[i]);
+		} while(write_results[i] < 0 && (difftime(time(NULL), start) <= timeout));			
+
+		if(write_results[i] < 0) {
+			printf("%s\n", "tavzeit dzala araa");
+			log_error("Couldn't send data to server", errno);
+		} else {
+			res = 0;
+		}
+	}
+
+	return res;
+}
+
+
+/* Returns fd of the first server socket that was available at that moment
+*/
+static int send_to_available_server(char* msg, int size) {
+	int i = 0;
+	int res = -1;
+	while(i < num_servers && res < 0) {
+		printf("Sending to server %d\n", server_sfds[i]);
+		int bytes_sent = write(server_sfds[i], msg, size);
+		printf("bytes_sent = %d\n", bytes_sent);
+		if(bytes_sent <= 0) {
+			i++;
+			continue;
+		} else {
+			res = server_sfds[i];	
+			break;		
+		}
+	}
+
+	return res;
+}
+
+
+
 int raid1_releasedir(const char *path, struct fuse_file_info *fi)
 {
     // printf("----  releasedir : %s\n", path);
@@ -96,32 +143,8 @@ int raid1_releasedir(const char *path, struct fuse_file_info *fi)
 }
 
 
-static int write_to_servers(char* msg, int size) {
-	int i;
-	for(i=0; i<num_servers; i++) {
-		write_results[i] = -1;
-		time_t start = time(NULL);	
-		do {
-			write_results[i] = write(server_sfds[i], msg, size);
-		} while(write_results[i] < 0 && (difftime(time(NULL), start) <= timeout));			
-
-		if(write_results[i] < 0) {
-			printf("%s\n", "tavzeit dzala araa");
-			log_error("Couldn't send data to server", errno);
-		}
-	}
-}
 
 static int raid1_getattr(const char *path, struct stat *stbuf) {
-	// printf("%s\n", "-------------------------------- GETATTR");
-	// int res;
-
-	// res = lstat(path, stbuf);
-	// if (res == -1)
-	// 	return -errno;
-
-	// return 0;
-
 	printf("%s\n", "-------------------------------- GETATTR");
 	int args_length = 8 + strlen(path)+1;
 	char* msg = malloc(sizeof(int) + 9 + strlen(path)); //
@@ -130,17 +153,20 @@ static int raid1_getattr(const char *path, struct stat *stbuf) {
 	memcpy(msg, &args_length, sizeof(int));
 
 	sprintf(msg+sizeof(int), "%s%s", "getattr;", path);
-	// printf("Passed path %s\n", path);
 	
-	int n;
-	if((n = write(socket_fd, msg, args_length + sizeof(int))) < 0) {
-		printf("%s\n", "Gotta retry");
+	int sfd = send_to_available_server(msg, args_length + sizeof(int));
+	if(sfd < 0) {
+		printf("%s\n", "ver chevitanet");
+		return -1;
 	}
+	// if((n = write(socket_fd, msg, args_length + sizeof(int))) < 0) {
+	// 	printf("%s\n", "Gotta retry");
+	// }
 	free(msg);
 
 	//---------- receiving response -----------------
 	char resp_raw [sizeof(int) + sizeof(struct stat)];
-	if(read(socket_fd, resp_raw, sizeof(int) + sizeof(struct stat)) < 0) {
+	if(read(sfd, resp_raw, sizeof(int) + sizeof(struct stat)) < 0) {
 		printf("%s\n", "Couldn't receive reponse");
 	}
 
@@ -459,43 +485,6 @@ static int raid1_truncate(const char *path, off_t size) {
 
 
 
-
-
-
-//alloc resp here and write status, st and dirname into it on each iteration. also pass buf
-//in order to call filler here as well. 
-// static int read_server_response(int socket_fd, char* resp, int* resp_size, char* buf, fuse_fill_dir_t filler) {
-// 	int total_bytes_read = 0;
-// 	int status = 0;
-// 	int num_bytes_read;
-
-// 	while(status >= 0) {
-// 		if((num_bytes_read=read(socket_fd, resp, *resp_size)) < 0) {
-// 			printf("Couldn't read from server %s\n", strerror(errno));
-// 		}
-// 		printf("num_bytes_read=%d\n", num_bytes_read);
-// 		memcpy(&status, resp, sizeof(int));
-// 		printf("status=%d\n", status);
-
-// 		if(status < 0) break;
-// 		struct stat st;
-// 		memcpy(&st, resp + sizeof(int), sizeof(st));
-// 		char* dirname = malloc(MAX_PATH_LENGTH);
-// 		strcpy(dirname, resp+sizeof(int)+sizeof(st));
-// 		printf("dirname is %s\n", dirname);
-// 		if (filler(buf, dirname, &st, 0))
-// 			break;
-
-// 		total_bytes_read += num_bytes_read;
-// 	}
-
-
-// 	printf("total_bytes_read=%d\n", total_bytes_read);
-// 	return total_bytes_read;
-// }
-
-
-
 static int raid1_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 		       off_t offset, struct fuse_file_info *fi)
 {
@@ -557,41 +546,6 @@ static int raid1_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 	free(msg);
 	return -status;
 }
-
-
-
-
-
-// int raid1_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset,
-//            struct fuse_file_info *fi)
-// {
-//     printf("----  readdir : %s\n", path); 
-
-// 	DIR *dp;
-// 	struct dirent *de;
-
-// 	(void) offset;
-// 	(void) fi;
-
-// 	dp = opendir(path);
-// 	if (dp == NULL)
-// 		return -errno;
-
-// 	while ((de = readdir(dp)) != NULL) {
-// 		struct stat st;
-// 		memset(&st, 0, sizeof(st));
-// 		st.st_ino = de->d_ino;
-// 		st.st_mode = de->d_type << 12;
-// 		if (filler(buf, de->d_name, &st, 0))
-// 			break;
-// 	}
-
-// 	closedir(dp);
-// 	return 0;
-
-
-// }
-
 
 
 
@@ -659,27 +613,6 @@ static int raid1_rename(const char* from, const char *to) {
 
 
 
-
-
-
-
-// static int raid1_create(const char *path, mode_t mode, struct fuse_file_info *fi) {
-// 	printf("%s\n", "--------------------------------SYSCALL CREATE");
-// 	int res;
-
-// 	res = open(path, fi->flags, mode);
-// 	if (res == -1)
-// 		return -errno;
-// 	fi->fh = res;
-
-// 	return 0;
-
-// }
-
-
-
-
-
 static int split_address(const char* address, int* ip, int* port) {
 	char* addr_copy = strdup(address);
 	char* ip_str = strtok(addr_copy, ":");
@@ -694,50 +627,6 @@ static int split_address(const char* address, int* ip, int* port) {
 	return 0;
 }
 
-
-// static int create_socket_connection(char* address_str, int timeout, int* sfd_ptr, 
-// 																struct sockaddr_in* server_address) {
-// 	int ip, port;
-// 	(void) sfd_ptr;
-	
-// 	socket_fd = socket(AF_INET, SOCK_STREAM, 0);
-// 	if(socket_fd < 0) {
-// 		log_error("Couldn't acquire endpoint file descriptor", errno);
-// 		return -1;
-// 	}
-
-// 	if(split_address(address_str, &ip, &port) < 0){
-// 		log_error("Malformed server address", errno);
-// 		return -1; //special error code?
-// 	}
-
-// 	server_address->sin_family = AF_INET;
-// 	server_address->sin_port = htons(port);
-// 	server_address->sin_addr.s_addr = ip;
-
-// 	int conn_status = -1;
-// 	time_t start = time(NULL);
-	
-// 	while(conn_status < 0 && (difftime(time(NULL), start) <= timeout)) {
-// 		log_msg("Trying to connect to server");
-// 		printf("%s\n", "Trying to connect to server");
-// 		conn_status = connect(socket_fd, (struct sockaddr*)server_address, sizeof(*server_address));
-// 		if(conn_status < 0) {
-// 			sleep(2);
-// 		}
-// 	}
-
-// 	if(conn_status < 0) {
-// 		log_error("Couldn't connect to server", errno);
-// 		printf("%s %s\n", "Couldn't connect to server ", address_str);
-// 		//do hot swap
-// 		return -1;
-// 	}
-// 	printf("%s %s\n", "Connected to", address_str);
-// 	log_connection(address_str);
-
-// 	return 0;
-// }
 
 static int create_socket_connection(char* address_str, int timeout, int server_index) {
 	int ip, port;
