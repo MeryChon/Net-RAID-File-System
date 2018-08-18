@@ -70,45 +70,85 @@ static char* fill_in_basic_info (int args_length, const char* syscall, const cha
 	int bytes_written = 0;
 	int n = args_length;
 
-	printf("in fill_in_basic_info args_length=%d\n", n);
 	memcpy(buf, &n, sizeof(int));
 	bytes_written += sizeof(int);
-	printf("bytes_written=%d\n", bytes_written);
 	printf("args length %d\n", args_length);
 	strcpy(buf + bytes_written, syscall);
 	bytes_written += strlen(syscall);
 	printf("bytes_written=%d\n", bytes_written);
 	strcpy(buf + bytes_written, path);
 	bytes_written += strlen(path) + 1;
-	printf("Part of the buf %s\n", buf + sizeof(int));
 	*num_bytes_written = bytes_written;
 	
 	return buf;
 }
 
 
-int raid1_releasedir(const char *path, struct fuse_file_info *fi)
-{
-    printf("----  releasedir : %s\n", path);
 
-    int retstat = 0;
-    
-    closedir((DIR *) (uintptr_t) fi->fh);
-    
-    return retstat;
+static int send_to_all_servers(char* msg, int size) {
+	int i, res;
+	res = -1;
+	for(i=0; i<num_servers; i++) {
+		write_results[i] = -1;
+		time_t start = time(NULL);	
+		do {
+			write_results[i] = write(server_sfds[i], msg, size);
+			printf("Server N %d, write_result = %d\n", i, write_results[i]);
+		} while(write_results[i] < 0 && (difftime(time(NULL), start) <= timeout));			
+
+		if(write_results[i] < 0) {
+			printf("%s\n", "tavzeit dzala araa");
+			log_error("Couldn't send data to server", errno);
+		} else {
+			res = 0;
+		}
+	}
+
+	return res;
 }
 
 
+/* Returns fd of the first server socket that was available at that moment
+*/
+static int send_to_available_server(char* msg, int size) {
+	int i = 0;
+	int res = -1;
+	while(i < num_servers && res < 0) {
+		printf("iteration no %d Sending to server %d\n", i, server_sfds[i]);
+		int bytes_sent = write(server_sfds[i], msg, size);
+		printf("bytes_sent = %d\n", bytes_sent);
+		if(bytes_sent <= 0) {
+			char log_text [256];
+			sprintf(log_text, "Couldn't send data to server %s. Will try to send to next one", raids[i].diskname);
+			log_msg(log_text);
+			//TODO: add timeout here
+			i++;
+			continue;
+		} else {
+			res = server_sfds[i];	
+			break;		
+		}
+	}
+
+	return res;
+}
+
+
+
+int raid1_releasedir(const char *path, struct fuse_file_info *fi)
+{
+    // printf("----  releasedir : %s\n", path);
+
+    // int retstat = 0;
+    
+    // closedir((DIR *) (uintptr_t) fi->fh);
+    
+    return 0;
+}
+
+
+
 static int raid1_getattr(const char *path, struct stat *stbuf) {
-	// printf("%s\n", "-------------------------------- GETATTR");
-	// int res;
-
-	// res = lstat(path, stbuf);
-	// if (res == -1)
-	// 	return -errno;
-
-	// return 0;
-
 	printf("%s\n", "-------------------------------- GETATTR");
 	int args_length = 8 + strlen(path)+1;
 	char* msg = malloc(sizeof(int) + 9 + strlen(path)); //
@@ -117,19 +157,20 @@ static int raid1_getattr(const char *path, struct stat *stbuf) {
 	memcpy(msg, &args_length, sizeof(int));
 
 	sprintf(msg+sizeof(int), "%s%s", "getattr;", path);
-	// printf("Passed path %s\n", path);
 	
-	int n;
-	if((n = write(socket_fd, msg, args_length + sizeof(int))) < 0) {
-		printf("%s\n", "Gotta retry");
+	int sfd = send_to_available_server(msg, args_length + sizeof(int));
+	if(sfd < 0) {
+		printf("%s\n", "ver chevitanet");
+		return -1;
 	}
-	// printf("Part of the message %s\n", msg + sizeof(int));
-	// printf("Written bytes %d\n", n);
+	// if((n = write(socket_fd, msg, args_length + sizeof(int))) < 0) {
+	// 	printf("%s\n", "Gotta retry");
+	// }
 	free(msg);
 
 	//---------- receiving response -----------------
 	char resp_raw [sizeof(int) + sizeof(struct stat)];
-	if(read(socket_fd, resp_raw, sizeof(int) + sizeof(struct stat)) < 0) {
+	if(read(sfd, resp_raw, sizeof(int) + sizeof(struct stat)) < 0) {
 		printf("%s\n", "Couldn't receive reponse");
 	}
 
@@ -159,6 +200,10 @@ static int raid1_mkdir(const char* path, mode_t mode) {
 	printf("%s\n", msg + sizeof(int) + 6);
 
 	memcpy(msg + sizeof(int) + 6 + strlen(path) + 1, &mode, sizeof(mode_t));
+
+	// if(send_to_all_servers(msg, sizeof(int) + args_length) <= 0) {
+	// 	printf("Couldn't send message %s\n", strerror(errno));
+	// }
 
 	if(write(socket_fd, msg, sizeof(int) + args_length) <= 0) {
 		printf("Couldn't send message %s\n", strerror(errno));
@@ -222,13 +267,19 @@ static int raid1_open(const char *path, struct fuse_file_info *fi) {
 	printf("flags are %d\n", flags);
 	memcpy(msg + sizeof(int) + 5 + strlen(path) + 1, &flags, sizeof(int));
 
-	if(write(socket_fd, msg, sizeof(int) + args_length) <= 0) {
+	
+	int available_sfd;
+	if((available_sfd = send_to_available_server(msg, args_length + sizeof(int))) <= 0) {
 		printf("Couldn't send message %s\n", strerror(errno));
 	}
 
+	// if(write(socket_fd, msg, sizeof(int) + args_length) <= 0) {
+	// 	printf("Couldn't send message %s\n", strerror(errno));
+	// }
+
 	int status, fd;
 	char response[2*sizeof(int)];
-	if(read(socket_fd, response, 2*sizeof(int)) <= 0) {
+	if(read(available_sfd, response, 2*sizeof(int)) <= 0) {
 		printf("Couldn't receive response %s\n", strerror(errno));
 	}
 	memcpy(&status, response, sizeof(int));
@@ -260,13 +311,18 @@ static int raid1_read(const char *path, char *buf, size_t size, off_t offset, st
 	memcpy(msg + bytes_written, &size, sizeof(size_t));
 	memcpy(msg + bytes_written + sizeof(size_t), &offset, sizeof(off_t));
 
-	if(write(socket_fd, msg, args_length + sizeof(int)) <= 0) {
+	int available_sfd;
+	if((available_sfd = send_to_available_server(msg, args_length + sizeof(int))) <= 0) {
 		printf("Couldn't send message %s\n", strerror(errno));
 	}
+
+	// if(write(socket_fd, msg, args_length + sizeof(int)) <= 0) {
+	// 	printf("Couldn't send message %s\n", strerror(errno));
+	// }
 	
 	char* response = malloc(2*sizeof(int) + size);
 	assert(response != NULL);
-	if(read(socket_fd, response, 2*sizeof(int) + size) <= 0) {
+	if(read(available_sfd, response, 2*sizeof(int) + size) <= 0) {
 		printf("Couldn't receive response %s\n", strerror(errno));
 	}
 
@@ -448,43 +504,6 @@ static int raid1_truncate(const char *path, off_t size) {
 
 
 
-
-
-
-//alloc resp here and write status, st and dirname into it on each iteration. also pass buf
-//in order to call filler here as well. 
-// static int read_server_response(int socket_fd, char* resp, int* resp_size, char* buf, fuse_fill_dir_t filler) {
-// 	int total_bytes_read = 0;
-// 	int status = 0;
-// 	int num_bytes_read;
-
-// 	while(status >= 0) {
-// 		if((num_bytes_read=read(socket_fd, resp, *resp_size)) < 0) {
-// 			printf("Couldn't read from server %s\n", strerror(errno));
-// 		}
-// 		printf("num_bytes_read=%d\n", num_bytes_read);
-// 		memcpy(&status, resp, sizeof(int));
-// 		printf("status=%d\n", status);
-
-// 		if(status < 0) break;
-// 		struct stat st;
-// 		memcpy(&st, resp + sizeof(int), sizeof(st));
-// 		char* dirname = malloc(MAX_PATH_LENGTH);
-// 		strcpy(dirname, resp+sizeof(int)+sizeof(st));
-// 		printf("dirname is %s\n", dirname);
-// 		if (filler(buf, dirname, &st, 0))
-// 			break;
-
-// 		total_bytes_read += num_bytes_read;
-// 	}
-
-
-// 	printf("total_bytes_read=%d\n", total_bytes_read);
-// 	return total_bytes_read;
-// }
-
-
-
 static int raid1_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 		       off_t offset, struct fuse_file_info *fi)
 {
@@ -494,14 +513,20 @@ static int raid1_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 	char* msg = fill_in_basic_info(args_length, "readdir;", path, &bytes_written);//malloc(sizeof(int) + args_length); //
 	// printf("Part of the message %s\n", msg + sizeof(int));
 
-	if(write(socket_fd, msg, sizeof(int) + args_length) <= 0) {
+	// if(write(socket_fd, msg, sizeof(int) + args_length) <= 0) {
+	// 	printf("Couldn't send message %s\n", strerror(errno));
+	// }
+
+	int available_sfd;
+	if((available_sfd = send_to_available_server(msg, args_length + sizeof(int))) <= 0) {
 		printf("Couldn't send message %s\n", strerror(errno));
 	}
+
 
 	int status, bytes_to_read;
 	char* buffer = malloc(2 * sizeof(int));
 	assert(buffer != NULL);
-	if(read(socket_fd, buffer, sizeof(int)*2) <= 0){
+	if(read(available_sfd, buffer, sizeof(int)*2) <= 0){
 		printf("Couldn't receive response info %s\n", strerror(errno));
 	}
 	memcpy(&status, buffer, sizeof(int));
@@ -515,7 +540,7 @@ static int raid1_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 		assert(buffer != NULL);
 		//Reading with one read might be a bad idea, as data might be pretty big 
 		//for big dig directories
-		bytes_received = read(socket_fd, buffer, bytes_to_read);
+		bytes_received = read(available_sfd, buffer, bytes_to_read);
 		// while(bytes_received < bytes_to_read) {
 		// 	int nbr = read(socket_fd, buffer+bytes_received, bytes_read_on_iteration);
 		// 	if(nbr < 0) {
@@ -546,41 +571,6 @@ static int raid1_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 	free(msg);
 	return -status;
 }
-
-
-
-
-
-// int raid1_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset,
-//            struct fuse_file_info *fi)
-// {
-//     printf("----  readdir : %s\n", path); 
-
-// 	DIR *dp;
-// 	struct dirent *de;
-
-// 	(void) offset;
-// 	(void) fi;
-
-// 	dp = opendir(path);
-// 	if (dp == NULL)
-// 		return -errno;
-
-// 	while ((de = readdir(dp)) != NULL) {
-// 		struct stat st;
-// 		memset(&st, 0, sizeof(st));
-// 		st.st_ino = de->d_ino;
-// 		st.st_mode = de->d_type << 12;
-// 		if (filler(buf, de->d_name, &st, 0))
-// 			break;
-// 	}
-
-// 	closedir(dp);
-// 	return 0;
-
-
-// }
-
 
 
 
@@ -648,27 +638,6 @@ static int raid1_rename(const char* from, const char *to) {
 
 
 
-
-
-
-
-// static int raid1_create(const char *path, mode_t mode, struct fuse_file_info *fi) {
-// 	printf("%s\n", "--------------------------------SYSCALL CREATE");
-// 	int res;
-
-// 	res = open(path, fi->flags, mode);
-// 	if (res == -1)
-// 		return -errno;
-// 	fi->fh = res;
-
-// 	return 0;
-
-// }
-
-
-
-
-
 static int split_address(const char* address, int* ip, int* port) {
 	char* addr_copy = strdup(address);
 	char* ip_str = strtok(addr_copy, ":");
@@ -727,13 +696,25 @@ static int create_socket_connection(char* address_str, int timeout, int server_i
 }
 
 
+
 int raid1_fuse_main(const char* process_name, struct meta_info client_info,
 																	 struct disk_info storage_info) {
 	raid1_root = strdup(storage_info.mountpoint);
+<<<<<<< HEAD
 	server_sfds = malloc(sizeof(int) * storage_info.num_servers);
 	assert(server_sfds != NULL);
 	server_addrs = malloc(sizeof(struct sockaddr_in) * storage_info.num_servers);
 	assert(server_addrs != NULL);
+=======
+	num_servers = storage_info.num_servers;
+	server_sfds = malloc(sizeof(int) * num_servers);
+	assert(server_sfds != NULL);
+	server_addrs = malloc(sizeof(struct sockaddr_in) * num_servers);
+	assert(server_addrs != NULL);
+	write_results = malloc(sizeof(int) * num_servers);
+	assert(write_results != NULL);
+	timeout = client_info.timeout;
+>>>>>>> tmp
 
 	int server_index = 0;
 	int i = 0;

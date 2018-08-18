@@ -18,6 +18,7 @@ struct disk_info {
 	char* hotswap; 
 };
 
+struct disk_info* raids;
 
 
 #endif

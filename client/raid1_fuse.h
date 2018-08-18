@@ -37,10 +37,22 @@
 
 
 const char *raid1_root;
+<<<<<<< HEAD
 struct sockaddr_in* server_addrs;
 int socket_fd;
 int* server_sfds;
 
+=======
+struct sockaddr_in server_addr;
+int socket_fd; //TODO: Must be deleted
+struct sockaddr_in* server_addrs;
+int num_servers;
+int* server_sfds;
+int* write_results;
+int* read_results;
+int* active_servers;
+int timeout;
+>>>>>>> tmp
 
 int raid1_fuse_main(const char* process_name, struct meta_info client_info, struct disk_info storage_info);
 
