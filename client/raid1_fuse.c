@@ -114,10 +114,14 @@ static int send_to_available_server(char* msg, int size) {
 	int i = 0;
 	int res = -1;
 	while(i < num_servers && res < 0) {
-		printf("Sending to server %d\n", server_sfds[i]);
+		printf("iteration no %d Sending to server %d\n", i, server_sfds[i]);
 		int bytes_sent = write(server_sfds[i], msg, size);
 		printf("bytes_sent = %d\n", bytes_sent);
 		if(bytes_sent <= 0) {
+			char log_text [256];
+			sprintf(log_text, "Couldn't send data to server %s. Will try to send to next one", raids[i].diskname);
+			log_msg(log_text);
+			//TODO: add timeout here
 			i++;
 			continue;
 		} else {
@@ -197,6 +201,10 @@ static int raid1_mkdir(const char* path, mode_t mode) {
 
 	memcpy(msg + sizeof(int) + 6 + strlen(path) + 1, &mode, sizeof(mode_t));
 
+	// if(send_to_all_servers(msg, sizeof(int) + args_length) <= 0) {
+	// 	printf("Couldn't send message %s\n", strerror(errno));
+	// }
+
 	if(write(socket_fd, msg, sizeof(int) + args_length) <= 0) {
 		printf("Couldn't send message %s\n", strerror(errno));
 	}
@@ -259,13 +267,19 @@ static int raid1_open(const char *path, struct fuse_file_info *fi) {
 	printf("flags are %d\n", flags);
 	memcpy(msg + sizeof(int) + 5 + strlen(path) + 1, &flags, sizeof(int));
 
-	if(write(socket_fd, msg, sizeof(int) + args_length) <= 0) {
+	
+	int available_sfd;
+	if((available_sfd = send_to_available_server(msg, args_length + sizeof(int))) <= 0) {
 		printf("Couldn't send message %s\n", strerror(errno));
 	}
 
+	// if(write(socket_fd, msg, sizeof(int) + args_length) <= 0) {
+	// 	printf("Couldn't send message %s\n", strerror(errno));
+	// }
+
 	int status, fd;
 	char response[2*sizeof(int)];
-	if(read(socket_fd, response, 2*sizeof(int)) <= 0) {
+	if(read(available_sfd, response, 2*sizeof(int)) <= 0) {
 		printf("Couldn't receive response %s\n", strerror(errno));
 	}
 	memcpy(&status, response, sizeof(int));
@@ -297,13 +311,18 @@ static int raid1_read(const char *path, char *buf, size_t size, off_t offset, st
 	memcpy(msg + bytes_written, &size, sizeof(size_t));
 	memcpy(msg + bytes_written + sizeof(size_t), &offset, sizeof(off_t));
 
-	if(write(socket_fd, msg, args_length + sizeof(int)) <= 0) {
+	int available_sfd;
+	if((available_sfd = send_to_available_server(msg, args_length + sizeof(int))) <= 0) {
 		printf("Couldn't send message %s\n", strerror(errno));
 	}
+
+	// if(write(socket_fd, msg, args_length + sizeof(int)) <= 0) {
+	// 	printf("Couldn't send message %s\n", strerror(errno));
+	// }
 	
 	char* response = malloc(2*sizeof(int) + size);
 	assert(response != NULL);
-	if(read(socket_fd, response, 2*sizeof(int) + size) <= 0) {
+	if(read(available_sfd, response, 2*sizeof(int) + size) <= 0) {
 		printf("Couldn't receive response %s\n", strerror(errno));
 	}
 
@@ -494,14 +513,20 @@ static int raid1_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 	char* msg = fill_in_basic_info(args_length, "readdir;", path, &bytes_written);//malloc(sizeof(int) + args_length); //
 	// printf("Part of the message %s\n", msg + sizeof(int));
 
-	if(write(socket_fd, msg, sizeof(int) + args_length) <= 0) {
+	// if(write(socket_fd, msg, sizeof(int) + args_length) <= 0) {
+	// 	printf("Couldn't send message %s\n", strerror(errno));
+	// }
+
+	int available_sfd;
+	if((available_sfd = send_to_available_server(msg, args_length + sizeof(int))) <= 0) {
 		printf("Couldn't send message %s\n", strerror(errno));
 	}
+
 
 	int status, bytes_to_read;
 	char* buffer = malloc(2 * sizeof(int));
 	assert(buffer != NULL);
-	if(read(socket_fd, buffer, sizeof(int)*2) <= 0){
+	if(read(available_sfd, buffer, sizeof(int)*2) <= 0){
 		printf("Couldn't receive response info %s\n", strerror(errno));
 	}
 	memcpy(&status, buffer, sizeof(int));
@@ -515,7 +540,7 @@ static int raid1_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 		assert(buffer != NULL);
 		//Reading with one read might be a bad idea, as data might be pretty big 
 		//for big dig directories
-		bytes_received = read(socket_fd, buffer, bytes_to_read);
+		bytes_received = read(available_sfd, buffer, bytes_to_read);
 		// while(bytes_received < bytes_to_read) {
 		// 	int nbr = read(socket_fd, buffer+bytes_received, bytes_read_on_iteration);
 		// 	if(nbr < 0) {

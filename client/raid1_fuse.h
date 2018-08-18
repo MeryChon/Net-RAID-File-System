@@ -38,7 +38,7 @@
 
 const char *raid1_root;
 struct sockaddr_in server_addr;
-int socket_fd;
+int socket_fd; //TODO: Must be deleted
 struct sockaddr_in* server_addrs;
 int num_servers;
 int* server_sfds;

@@ -24,7 +24,7 @@
 
 #include "structs.h"
 
-struct disk_info* raids;
+// struct disk_info* raids;
 int num_storages = 0;
 struct meta_info client_info;
 char* client_info_keys[] = {"errorlog", "cache_size", "cache_replacement", "timeout"};
