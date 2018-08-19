@@ -524,12 +524,12 @@ static int readdir_handler (int client_sfd, char args[]) {
 	assert(buf!=NULL);
 
 	// memcpy(buf, &status, sizeof(int));	
-	int bytes_filled = 0;
+	int bytes_filled = 2 * sizeof(int);
 	int num_structs = 0;	//TODO: remove? for debug only?
 	printf("Size of struct stat %lu\n", sizeof(struct stat));
 	while ( (status == 0) && ((de = readdir(dp)) != NULL) ) {
 		if(bytes_filled >= buf_size) {
-			buf_size *= 2;
+			buf_size += buf_size;
 			printf("Must realloc %d\n", buf_size);
 			buf = realloc(buf, buf_size);
 			if(buf == NULL) {
@@ -557,25 +557,23 @@ static int readdir_handler (int client_sfd, char args[]) {
 	printf("status=%d\n", status);
 	printf("Total bytes filled in %d\n", bytes_filled);
 
-	char* info = malloc(2 * sizeof(int));
-	memcpy(info, &status, sizeof(int));
-	memcpy(info + sizeof(int), &bytes_filled, sizeof(int));
+	// char* info = malloc(2 * sizeof(int));
+	// memcpy(info, &status, sizeof(int));
+	// memcpy(info + sizeof(int), &bytes_filled, sizeof(int));
+	memcpy(buf, &status, sizeof(int));
+	memcpy(buf + sizeof(int), &bytes_filled, sizeof(int));
 
-	if(write(client_sfd, info, 2*sizeof(int)) <= 0) {
-		printf("Couldn't send info %s\n", strerror(errno));
-	}
+	// if(write(client_sfd, buf, 2*sizeof(int)) <= 0) {
+	// 	printf("Couldn't send info %s\n", strerror(errno));
+	// }
 
-	if(status == 0) {
+	// if(status == 0) {
 		int bytes_sent = 0;
 		int nbs = write(client_sfd, buf, bytes_filled);
-		// while(bytes_sent < bytes_filled) {
-		// 	int nbs = write(client_sfd, buf+bytes_sent, 1024);
-		// 	bytes_sent += nbs;
-		// }
 		printf("bytes_sent=%d\n", nbs);
-	}
+	// }
 	
-	free(info);
+	// free(info);
 	free(buf);
 	return -status;
 }
