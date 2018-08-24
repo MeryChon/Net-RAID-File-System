@@ -85,18 +85,21 @@ static char* fill_in_basic_info (int args_length, const char* syscall, const cha
 
 
 
+
+
+//TODO: Must create write_to_server and read_from_server functions to declutter the code
 static int communicate_with_all_servers(char* msg, int size, char* resp, int expected_size, int* actual_size) {
 	int i;
 	for(i=0; i<num_servers; i++) {
 		write_results[i] = -1;
 		read_results[i] = -1;
 		//Might move to function read_from_server()
-		time_t start = time(NULL);	
-		do {
+		// time_t start = time(NULL);	
+		// do {
 			write_results[i] = write(server_sfds[i], msg, size);
 			printf("Server N %d, write_result = %d\n", i, write_results[i]);
-			if(write_results[i] <= 0) sleep(1);
-		} while(write_results[i] < 0 && (difftime(time(NULL), start) <= timeout));			
+			// if(write_results[i] <= 0) sleep(1);
+		// } while(write_results[i] < 0 && (difftime(time(NULL), start) <= timeout));			
 
 		if(write_results[i] <= 0) {
 			printf("%s\n", "tavzeit dzala araa");
@@ -108,18 +111,18 @@ static int communicate_with_all_servers(char* msg, int size, char* resp, int exp
 			printf("expected_size=%d\n", expected_size);
 
 		//Might move to function write_to_server()
-		start = time(NULL);
-		do {
+		// start = time(NULL);
+		// do {
 			read_results[i] = read(server_sfds[i], resp, expected_size);
 			*actual_size = read_results[i];
 			printf("Server N %d, read_result = %d\n", i, read_results[i]);
-			if(read_results[i] <= 0) sleep(0.5);
-		} while(read_results[i] <= 0 && (difftime(time(NULL), start) <= timeout));	
+		// 	if(read_results[i] <= 0) sleep(0.5);
+		// } while(read_results[i] <= 0 && (difftime(time(NULL), start) <= timeout));	
 
 		if(read_results[i] <= 0) {
 			printf("%s\n", "tavzeit dzala araa, ver chamevitanet");
 			char log_text [1024];
-			sprintf(log_text, "Couldn't receive data from storage %s.", raids[i].diskname);
+			sprintf(log_text, "Operation not completed. Couldn't receive data from storage %s.", raids[i].diskname);
 			log_error(log_text, errno);
 			return -1;
 		}
@@ -128,23 +131,24 @@ static int communicate_with_all_servers(char* msg, int size, char* resp, int exp
 }
 
 
+
 /*
 */
 static int communicate_with_available_server(char* msg, const int size, char* resp, const int expected_size, int* available_sfd) {
 	int i = 0;
 	int actual_size = -1;
-	int bytes_read = -1;
+	// int bytes_read = -1;
 	printf("num_servers=%d\n", num_servers);
-	while(i < num_servers && actual_size < 0) {
+	while(i < num_servers && actual_size <= 0) {
 		printf("iteration no %d Sending to server %d\n", i, server_sfds[i]);	
 		write_results[i] = -1;
 		//Might move to function read_from_server()
-		time_t start = time(NULL);	
-		do {
+		// time_t start = time(NULL);	
+		// do {
 			write_results[i] = write(server_sfds[i], msg, size);
 			printf("Server N %d, write_result = %d\n", i, write_results[i]);
-			if(write_results[i] <= 0) sleep(1);
-		} while(write_results[i] <= 0 && (difftime(time(NULL), start) <= timeout));			
+		// 	if(write_results[i] <= 0) sleep(1);
+		// } while(write_results[i] <= 0 && (difftime(time(NULL), start) <= timeout));			
 
 		if(write_results[i] <= 0) {
 			printf("%s\n", "tavzeit dzala araa");
@@ -155,13 +159,13 @@ static int communicate_with_available_server(char* msg, const int size, char* re
 			continue;
 		}
 
-		start = time(NULL);
-		do {
+		// start = time(NULL);
+		// do {
 			read_results[i] = read(server_sfds[i], resp, expected_size);
 			actual_size = read_results[i];
 			printf("Server N %d, read_result = %d\n", i, read_results[i]);
-			if(read_results[i] <= 0) sleep(1);
-		} while(read_results[i] <= 0 && (difftime(time(NULL), start) <= timeout));	
+		// 	if(read_results[i] <= 0) sleep(1);
+		// } while(read_results[i] <= 0 && (difftime(time(NULL), start) <= timeout));	
 
 		if(read_results[i] <= 0) {
 			printf("%s\n", "Couldn't read data from storage");
@@ -169,8 +173,8 @@ static int communicate_with_available_server(char* msg, const int size, char* re
 			sprintf(log_text, "Couldn't read data from storage %s. Will try the next one", raids[i].diskname);
 			log_msg(log_text);
 			i++;
-			// continue;
-		} else break;
+			continue;
+		} else {break;}
 	}	
 	printf("actual_size=%d\n", actual_size);
 	return actual_size;
