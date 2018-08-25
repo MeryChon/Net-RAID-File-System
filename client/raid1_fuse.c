@@ -223,6 +223,42 @@ static int raid1_getattr(const char *path, struct stat *stbuf) {
 }
 
 
+static int raid1_open(const char *path, struct fuse_file_info *fi) {
+	printf("%s\n", "-------------------------------- OPEN");
+
+	int args_length = 5 + strlen(path) + 1 + sizeof(int);
+	char* msg = malloc(sizeof(int) + args_length); //
+	assert(msg != NULL);
+
+	memcpy(msg, &args_length, sizeof(int));
+	printf("args length %d\n", args_length);
+
+	strcpy(msg + sizeof(int), "open;");
+	strcpy(msg + sizeof(int) + 5, path);
+	printf("%s\n", msg + sizeof(int));
+
+	int flags = fi->flags;
+	printf("flags are %d\n", flags);
+	memcpy(msg + sizeof(int) + 5 + strlen(path) + 1, &flags, sizeof(int));
+
+	
+	int available_sfd, status, fd;
+	int response_size = 2*sizeof(int);
+	char response[response_size];
+	if((available_sfd = communicate_with_available_server(msg, args_length + sizeof(int), response, response_size, NULL)) <= 0) {
+		printf("Couldn't send message %s\n", strerror(errno));
+	}
+
+	memcpy(&status, response, sizeof(int));
+	memcpy(&fd, response + sizeof(int), sizeof(int));
+	printf("status is %d, fd is %d\n", status, fd);
+	fi->fh = fd;
+
+	free(msg);
+	return -status;
+}
+
+
 static int raid1_mkdir(const char* path, mode_t mode) {
 	printf("%s\n", "-------------------------------- MKDIR");
 	int args_length = 6 + strlen(path)+ 1 + sizeof(mode_t);
@@ -276,44 +312,6 @@ static int raid1_rmdir(const char* path){
 	free(msg);
 	return -response;
 }
-
-
-
-static int raid1_open(const char *path, struct fuse_file_info *fi) {
-	printf("%s\n", "-------------------------------- OPEN");
-
-	int args_length = 5 + strlen(path) + 1 + sizeof(int);
-	char* msg = malloc(sizeof(int) + args_length); //
-	assert(msg != NULL);
-
-	memcpy(msg, &args_length, sizeof(int));
-	printf("args length %d\n", args_length);
-
-	strcpy(msg + sizeof(int), "open;");
-	strcpy(msg + sizeof(int) + 5, path);
-	printf("%s\n", msg + sizeof(int));
-
-	int flags = fi->flags;
-	printf("flags are %d\n", flags);
-	memcpy(msg + sizeof(int) + 5 + strlen(path) + 1, &flags, sizeof(int));
-
-	
-	int available_sfd, status, fd;
-	int response_size = 2*sizeof(int);
-	char response[response_size];
-	if((available_sfd = communicate_with_available_server(msg, args_length + sizeof(int), response, response_size, NULL)) <= 0) {
-		printf("Couldn't send message %s\n", strerror(errno));
-	}
-
-	memcpy(&status, response, sizeof(int));
-	memcpy(&fd, response + sizeof(int), sizeof(int));
-	printf("status is %d, fd is %d\n", status, fd);
-	fi->fh = fd;
-
-	free(msg);
-	return -status;
-}
-
 
 
 static int raid1_opendir (const char* path, struct fuse_file_info* fi) {

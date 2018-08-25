@@ -154,6 +154,36 @@ static int rmdir_handler (int client_sfd, char args[]) {
 	return -ret_val;
 }
 
+
+
+static size_t djb_hash(const char* string) {
+	size_t hash = 5381;
+    while (*srting) {
+        hash = 33 * hash ^ (unsigned char) *string++;
+    }
+    return hash;
+}
+
+
+static int check_hash(const char* path) {
+	FILE* file = fopen(path, "r");
+	struct stat st;
+	off_t file_size;
+	if(stat(path, &st) == 0) {
+		file_size = st.st_size;
+	} else {
+		return -errno;
+	}
+
+	printf("file size is %lu\n", file_size);
+
+	char* file_content = malloc(2048);
+	assert(file_content != NULL);
+
+}
+
+
+
 static int open_handler (int client_sfd, char args[]) {
 	printf("%s\n", "--------------------OPEN HANDLER");
 	char path[MAX_PATH_LENGTH];
@@ -170,9 +200,10 @@ static int open_handler (int client_sfd, char args[]) {
 
     int fd;
     int status = 0;
+    int file_intact = check_hash(fpath);
     fd = open(fpath, flags);
 	if (fd == -1) {
-		printf("open returner -1 %s\n", strerror(errno));
+		printf("open returned -1 %s\n", strerror(errno));
 		status = errno;
 	}
 	printf("status is %d,fd is %d\n", status, fd);
