@@ -59,3 +59,6 @@ test_config.txt
 
 #log.files
 *.log
+
+net_raid_server
+net_raid_client

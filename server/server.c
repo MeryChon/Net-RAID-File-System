@@ -15,10 +15,12 @@
 #include <assert.h>
 #include <fcntl.h>
 #include <utime.h>
+#include <sys/xattr.h>
 
 #define BACKLOG 10
 #define MAX_CLIENT_MSG_LENGTH 2048
 #define MAX_ARGS_LENGTH 2000
+#define HASH_ATTR_NAME "user.hash"
 
 
 
@@ -42,6 +44,174 @@ static void print_stat(struct stat* stbuf) {
             (size_t)stbuf->st_mtime, (size_t)stbuf->st_ctime, (size_t)stbuf->st_blksize, (size_t)stbuf->st_blocks);
 }
 
+
+static char* get_path_from_args(char args[], int* path_length) {
+	char path[MAX_PATH_LENGTH];
+	strcpy(path, args);
+	printf("path is %s\n", path);
+
+	char* fpath = malloc(MAX_PATH_LENGTH);
+	assert(fpath != NULL);
+	fullpath(fpath, args);
+    printf("Full path is %s length %lu\n", fpath, strlen(fpath));
+
+    *path_length = strlen(path);
+
+    return fpath;
+}
+
+static int write_dir_info(char* buf, struct dirent *de, int* buffer_size, int* bytes_filled){
+	int dname_size = strlen(de->d_name)+1;
+	if(*buffer_size < *bytes_filled + sizeof(struct stat) + dname_size) {
+		*buffer_size = 2*(*buffer_size);
+		buf = realloc(buf, *buffer_size);
+		if(buf == NULL) return -1;
+	}
+
+	struct stat st;
+	memset(&st, 0, sizeof(st));
+	st.st_ino = de->d_ino;
+	st.st_mode = de->d_type << 12;
+	print_stat(&st);
+	memcpy(buf+*bytes_filled, &st, sizeof(st));
+	printf("%s\n", de->d_name);
+	strcpy(buf+*bytes_filled + sizeof(st), de->d_name);
+
+	*bytes_filled += (sizeof(st) + dname_size);
+	printf("bytes_filled=%d\n", *bytes_filled);
+	return 0;
+}
+
+
+
+
+static int send_buffer(int client_sfd, char* buf, int num_bytes_to_send) {
+	int num_bytes_sent = 0;
+	while(num_bytes_sent < num_bytes_to_send) {
+		int sent;
+		if((sent=write(client_sfd, buf, 1024)) < 0)
+			break;
+		num_bytes_sent += sent;
+		printf("Bytes sent %d\n", sent);
+	}
+	return num_bytes_sent;
+}
+
+
+
+
+static int send_dir_info(int cfd, int status, struct stat* st, char* dirname) {
+	int buffer_size = sizeof(int) + sizeof(st) + strlen(dirname) + 1;
+	printf("buffer_size=%d\n", buffer_size);
+	printf("dirname is %s\n", dirname);
+	// int diname_length = strlen(dirname);
+	char* buf = malloc(buffer_size);
+	assert(buf!=NULL);
+	memcpy(buf, &status, sizeof(int));
+	memcpy(buf+sizeof(int), st, sizeof(st));
+	// memcpy(buf + sizeof(st), &dirname_length, sizeof(int));
+	strcpy(buf + sizeof(int) + sizeof(st), dirname);
+
+	if(write(cfd, buf, buffer_size) <= 0) {
+		printf("%s\n", strerror(errno));
+	}
+	return buffer_size;
+}
+
+
+
+//-------------------- HASH STUFF ---------------------------
+
+static size_t djb_hash(const char* string) {
+	size_t hash = 5381;
+    while (*string) {
+        hash = 33 * hash ^ (unsigned char) *string++;
+    }
+    return hash;
+}
+
+
+
+static off_t get_file_size(const char* path) {
+	struct stat st;
+	off_t file_size;
+	if(stat(path, &st) == 0) {
+		return st.st_size;
+	}
+	return (off_t)-errno;
+}
+
+
+static int get_file_hash(const char* path) {
+	off_t file_size = get_file_size(path);
+	char* file_content = malloc(file_size * sizeof(char));
+	assert(file_content != NULL);
+
+	FILE* file = fopen(path, "r");
+	int res = 0;
+	if(fseek(file, 0, SEEK_SET) != 0) {
+		free(file_content);
+		return -errno;
+	}
+
+	//using file_Size as number of elements might be wrong file_size/sizof(char) maybe?
+	int elems_read = fread(file_content, sizeof(char), file_size/sizeof(char), file);
+	printf("elems_read = %d\n", elems_read);
+	printf("content:  %s\n", file_content);
+	fclose(file);
+	free(file_content);
+
+	if(elems_read != file_size) {
+		return -errno;
+	}
+
+	return djb_hash(file_content);
+}
+
+
+static int check_hash(const char* path) {
+	off_t file_size = get_file_size(path);
+	printf("file size is %lu\n", file_size);
+
+	char* file_content = malloc(file_size * sizeof(char));
+	assert(file_content != NULL);
+
+	size_t h1 = get_file_hash(path);
+	printf("h1=%lu\n", h1);
+
+	size_t h2;
+	int n = getxattr(path, "HASH_ATTR_NAME", &h2, sizeof(size_t));
+	if(n < 0) printf("getxattr: %s\n", strerror(errno));
+	printf("getxattr returned %d\n", n);
+	// if(getxattr(path, "HASH_ATTR_NAME", &h2, sizeof(size_t)) == sizeof(size_t)) {
+		printf("h2=%lu\n", h2);
+		if(h1 == h2) {			
+			return 1;
+		} else {
+			return 0;
+		}
+	// }
+	return -errno;
+}
+
+
+static void update_hash(const char* path, int attr_exists) {
+	off_t file_size = get_file_size(path);
+	printf("file size is %lu\n", file_size);
+
+	size_t hash = get_file_hash(path);
+	printf("hash is %lu\n", hash);
+
+	int flags = 0;//attr_exists ? XATTR_REPLACE : XATTR_CREATE;
+	int n = setxattr(path, "HASH_ATTR_NAME", &hash, sizeof(size_t), flags);
+	if(n < 0) printf("setxattr: %s\n", strerror(errno));
+
+}
+//--------------------------------------------------------------------
+
+
+
+//========================= SYSCALL HANDLERS =========================
 
 static int getattr_handler(int client_sfd, char path[]) {
 	printf("%s\n", "--------------------GETATTR HANDLER");
@@ -156,34 +326,6 @@ static int rmdir_handler (int client_sfd, char args[]) {
 
 
 
-static size_t djb_hash(const char* string) {
-	size_t hash = 5381;
-    while (*srting) {
-        hash = 33 * hash ^ (unsigned char) *string++;
-    }
-    return hash;
-}
-
-
-static int check_hash(const char* path) {
-	FILE* file = fopen(path, "r");
-	struct stat st;
-	off_t file_size;
-	if(stat(path, &st) == 0) {
-		file_size = st.st_size;
-	} else {
-		return -errno;
-	}
-
-	printf("file size is %lu\n", file_size);
-
-	char* file_content = malloc(2048);
-	assert(file_content != NULL);
-
-}
-
-
-
 static int open_handler (int client_sfd, char args[]) {
 	printf("%s\n", "--------------------OPEN HANDLER");
 	char path[MAX_PATH_LENGTH];
@@ -273,21 +415,6 @@ static int read_handler (int client_sfd, char args[]) {
 }
 
 
-static char* get_path_from_args(char args[], int* path_length) {
-	char path[MAX_PATH_LENGTH];
-	strcpy(path, args);
-	printf("path is %s\n", path);
-
-	char* fpath = malloc(MAX_PATH_LENGTH);
-	assert(fpath != NULL);
-	fullpath(fpath, args);
-    printf("Full path is %s length %lu\n", fpath, strlen(fpath));
-
-    *path_length = strlen(path);
-
-    return fpath;
-}
-
 
 static int write_handler (int client_sfd, char args[]) {
 	printf("%s\n", "--------------------WRITE HANDLER");
@@ -323,6 +450,8 @@ static int write_handler (int client_sfd, char args[]) {
 		close(fd);
 	}
 	printf("res %d, bytes_written %d\n", res, bytes_written);
+
+	update_hash(fpath, 1);
 
 	char* response = malloc(2*sizeof(int));
 	assert(response != NULL);
@@ -420,6 +549,7 @@ static int mknod_handler (int client_sfd, char args[]) {
 	if (res == -1) {
 		ret_val = errno;
 	}
+	update_hash(fpath, 0);
 	printf("returning %d\n", ret_val);
 	if(write(client_sfd, &ret_val, sizeof(int)) <= 0) {
 		printf("Couldn't send response %s\n", strerror(errno));
@@ -466,69 +596,6 @@ static int truncate_handler (int client_sfd, char args[]) {
 
 	return res;
 }
-
-
-
-
-static int write_dir_info(char* buf, struct dirent *de, int* buffer_size, int* bytes_filled){
-	int dname_size = strlen(de->d_name)+1;
-	if(*buffer_size < *bytes_filled + sizeof(struct stat) + dname_size) {
-		*buffer_size = 2*(*buffer_size);
-		buf = realloc(buf, *buffer_size);
-		if(buf == NULL) return -1;
-	}
-
-	struct stat st;
-	memset(&st, 0, sizeof(st));
-	st.st_ino = de->d_ino;
-	st.st_mode = de->d_type << 12;
-	print_stat(&st);
-	memcpy(buf+*bytes_filled, &st, sizeof(st));
-	printf("%s\n", de->d_name);
-	strcpy(buf+*bytes_filled + sizeof(st), de->d_name);
-
-	*bytes_filled += (sizeof(st) + dname_size);
-	printf("bytes_filled=%d\n", *bytes_filled);
-	return 0;
-}
-
-
-
-
-static int send_buffer(int client_sfd, char* buf, int num_bytes_to_send) {
-	int num_bytes_sent = 0;
-	while(num_bytes_sent < num_bytes_to_send) {
-		int sent;
-		if((sent=write(client_sfd, buf, 1024)) < 0)
-			break;
-		num_bytes_sent += sent;
-		printf("Bytes sent %d\n", sent);
-	}
-	return num_bytes_sent;
-}
-
-
-
-
-static int send_dir_info(int cfd, int status, struct stat* st, char* dirname) {
-	int buffer_size = sizeof(int) + sizeof(st) + strlen(dirname) + 1;
-	printf("buffer_size=%d\n", buffer_size);
-	printf("dirname is %s\n", dirname);
-	// int diname_length = strlen(dirname);
-	char* buf = malloc(buffer_size);
-	assert(buf!=NULL);
-	memcpy(buf, &status, sizeof(int));
-	memcpy(buf+sizeof(int), st, sizeof(st));
-	// memcpy(buf + sizeof(st), &dirname_length, sizeof(int));
-	strcpy(buf + sizeof(int) + sizeof(st), dirname);
-
-	if(write(cfd, buf, buffer_size) <= 0) {
-		printf("%s\n", strerror(errno));
-	}
-	return buffer_size;
-}
-
-
 
 
 
@@ -609,10 +676,7 @@ static int readdir_handler (int client_sfd, char args[]) {
 	return -status;
 }
 
-
-
-
-
+//======================================================================================
 
 
 
@@ -622,8 +686,6 @@ static int read_from_client(int client_sfd, char* syscall, char* args) {
 	if(bytes_read < 0) {
 		return -1;
 	}
-	// printf("Bytes read %d\n", bytes_read);
-	// printf("Buffer is %s\n", buf + sizeof(int));
 
 	int info_length;
 	memcpy(&info_length, buf, sizeof(int));
@@ -634,11 +696,8 @@ static int read_from_client(int client_sfd, char* syscall, char* args) {
 
 	strcpy(syscall, strtok(buf + sizeof(int), ";"));
 	assert(syscall != NULL);
-	// printf("Syscall is %s\n", syscall);
 	memcpy(args, strtok(NULL, ";"), info_length - strlen(syscall) - 1);
-	// memcpy(args, buf + sizeof(int) + strlen(syscall) + 1, info_length - (sizeof(int) + strlen(syscall)));
-	// printf("args %s\n", args);
-	// printf("Bytes read %d\n", bytes_read);
+
 	return bytes_read;
 }
 
