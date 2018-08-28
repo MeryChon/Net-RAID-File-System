@@ -5,7 +5,7 @@ net_raid_client: client/net_raid_client.c client/net_raid_client.h client/raid1_
 
 
 net_raid_server: server/server.c server/server.h
-	gcc server/server.c -o net_raid_server
+	gcc server/server.c  -lcrypto  -o net_raid_server
 
 clean:
 	rm net_raid_client net_raid_server

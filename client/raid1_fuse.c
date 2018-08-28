@@ -83,7 +83,26 @@ static char* fill_in_basic_info (int args_length, const char* syscall, const cha
 	return buf;
 }
 
+static int write_to_server(int index, const char* msg, int size, char* resp, int expected_size, int* actual_size) {
+	write_results[i] = -1;
+	read_results[i] = -1;
+	//Might move to function read_from_server()
+	// time_t start = time(NULL);	
+	// do {
+		write_results[i] = write(server_sfds[i], msg, size);
+		printf("Server N %d, write_result = %d\n", i, write_results[i]);
+		// if(write_results[i] <= 0) sleep(1);
+	// } while(write_results[i] < 0 && (difftime(time(NULL), start) <= timeout));			
 
+	if(write_results[i] <= 0) {
+		printf("%s\n", "tavzeit dzala araa");
+		char log_text [1024];
+		sprintf(log_text, "Couldn't send data to storage %s.", raids[i].diskname);
+		log_error(log_text, errno);
+		return -1;
+	}
+		printf("expected_size=%d\n", expected_size);
+}
 
 
 
@@ -223,6 +242,15 @@ static int raid1_getattr(const char *path, struct stat *stbuf) {
 }
 
 
+
+// static int check_file_hashes(const char* path) {
+// 	int i;
+// 	for(i=0; i<num_servers; i++) {
+
+// 	}
+// 	return 0;
+// }
+
 static int raid1_open(const char *path, struct fuse_file_info *fi) {
 	printf("%s\n", "-------------------------------- OPEN");
 
@@ -241,9 +269,9 @@ static int raid1_open(const char *path, struct fuse_file_info *fi) {
 	printf("flags are %d\n", flags);
 	memcpy(msg + sizeof(int) + 5 + strlen(path) + 1, &flags, sizeof(int));
 
-	
-	int available_sfd, status, fd;
-	int response_size = 2*sizeof(int);
+	check_file_hashes(path);
+	int available_sfd, status, fd, file_intact;
+	int response_size = 3*sizeof(int);
 	char response[response_size];
 	if((available_sfd = communicate_with_available_server(msg, args_length + sizeof(int), response, response_size, NULL)) <= 0) {
 		printf("Couldn't send message %s\n", strerror(errno));
@@ -251,7 +279,8 @@ static int raid1_open(const char *path, struct fuse_file_info *fi) {
 
 	memcpy(&status, response, sizeof(int));
 	memcpy(&fd, response + sizeof(int), sizeof(int));
-	printf("status is %d, fd is %d\n", status, fd);
+	memcpy(&file_intact, response + 2*sizeof(int), sizeof(int));
+	printf("status is %d, fd is %d, file_intact is %d\n", status, fd, file_intact);
 	fi->fh = fd;
 
 	free(msg);

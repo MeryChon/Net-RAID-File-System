@@ -16,6 +16,9 @@
 #include <fcntl.h>
 #include <utime.h>
 #include <sys/xattr.h>
+#include <openssl/sha.h>
+
+// #include "hash.h"
 
 #define BACKLOG 10
 #define MAX_CLIENT_MSG_LENGTH 2048
@@ -122,12 +125,19 @@ static int send_dir_info(int cfd, int status, struct stat* st, char* dirname) {
 
 //-------------------- HASH STUFF ---------------------------
 
-static size_t djb_hash(const char* string) {
-	size_t hash = 5381;
-    while (*string) {
-        hash = 33 * hash ^ (unsigned char) *string++;
-    }
-    return hash;
+// static size_t djb_hash(const char* string) {
+// 	size_t hash = 5381;
+//     while (*string) {
+//         hash = 33 * hash ^ (unsigned char) *string++;
+//     }
+//     return hash;
+// }
+
+void print_hash(char* msg, unsigned char hash []) {
+	printf("%s:", msg);
+	int i;
+	for(i = 0; i < SHA_DIGEST_LENGTH; i++)
+		printf("%02x%c", hash[i], i < (SHA_DIGEST_LENGTH-1) ? ' ' : '\n');
 }
 
 
@@ -142,72 +152,118 @@ static off_t get_file_size(const char* path) {
 }
 
 
-static int get_file_hash(const char* path) {
+static int compute_file_hash(const char* path, unsigned char result []) {
 	off_t file_size = get_file_size(path);
+
+	FILE* file = fopen(path, "r+");
+	if(fseek(file, 0, SEEK_SET) != 0) {
+		printf("fseek %s\n", strerror(errno));
+		return -errno;
+	}
+
 	char* file_content = malloc(file_size * sizeof(char));
 	assert(file_content != NULL);
 
-	FILE* file = fopen(path, "r");
-	int res = 0;
-	if(fseek(file, 0, SEEK_SET) != 0) {
+	//using file_Size as number of elements might be wrong file_size/sizof(char) maybe?
+	int elems_read = fread(file_content, sizeof(char), file_size, file);
+	//add \0 ??
+	printf("elems_read = %d\n", elems_read);
+	printf("content:%s", file_content);
+	if(elems_read != file_size) {
 		free(file_content);
 		return -errno;
 	}
 
-	//using file_Size as number of elements might be wrong file_size/sizof(char) maybe?
-	int elems_read = fread(file_content, sizeof(char), file_size/sizeof(char), file);
-	printf("elems_read = %d\n", elems_read);
-	printf("content:  %s\n", file_content);
-	fclose(file);
-	free(file_content);
+	// SHA1(file_content, strlen(file_content), result);
 
-	if(elems_read != file_size) {
+	SHA_CTX c;
+	if(!SHA1_Init(&c)) {
+		printf("SHA1_Init: %s\n", strerror(errno));
 		return -errno;
 	}
 
-	return djb_hash(file_content);
+	if(!SHA1_Update(&c, file_content, file_size)) {
+		printf("SHA1_Update: %s\n", strerror(errno));
+		return -errno;
+	}
+
+	if(!SHA1_Final(result, &c)) {
+		printf("SHA1_Final: %s\n", strerror(errno));
+		return -errno;
+	}
+
+
+	print_hash("computed sha1", result);
+
+
+	fclose(file);
+	free(file_content);
+
+	
+	// unsigned char* result = malloc(SHA_DIGEST_LENGTH * sizeof(unsigned char));
+	// assert(result != NULL);
+	// SHA1_wrapper(file_content, result);
+	return 0;
+}
+
+
+static int hash_cmp(unsigned char h1[], unsigned char h2[]) {
+	int i;
+	for(i=0; i<SHA_DIGEST_LENGTH; i++) {
+		if(h1[i] != h2[i])
+			return 1;
+	}
+	return 0;
 }
 
 
 static int check_hash(const char* path) {
+	int ret_val = -1;
 	off_t file_size = get_file_size(path);
 	printf("file size is %lu\n", file_size);
 
-	char* file_content = malloc(file_size * sizeof(char));
-	assert(file_content != NULL);
-
-	size_t h1 = get_file_hash(path);
-	printf("h1=%lu\n", h1);
-
-	size_t h2;
-	int n = getxattr(path, "HASH_ATTR_NAME", &h2, sizeof(size_t));
-	if(n < 0) printf("getxattr: %s\n", strerror(errno));
-	printf("getxattr returned %d\n", n);
-	// if(getxattr(path, "HASH_ATTR_NAME", &h2, sizeof(size_t)) == sizeof(size_t)) {
-		printf("h2=%lu\n", h2);
-		if(h1 == h2) {			
-			return 1;
+	unsigned char h1[SHA_DIGEST_LENGTH];
+	int res;
+	if((res = compute_file_hash(path, h1)) == 0) {
+		print_hash("hash1", h1);
+		unsigned char h2 [SHA_DIGEST_LENGTH];
+		size_t size = sizeof(unsigned char) * SHA_DIGEST_LENGTH;
+		if(getxattr(path, HASH_ATTR_NAME, h2, size)  == size) {
+			print_hash("hash2", h2);
+			if(hash_cmp(h1, h2) == 0) {	
+				printf("%s\n", "Yaay");
+				ret_val = 1;
+			} else {
+				printf("%s\n", "Noooooooo");
+				ret_val = 0;
+			}
 		} else {
-			return 0;
+			ret_val = -errno;
+			printf("getxattr: %s\n", strerror(errno));
 		}
-	// }
-	return -errno;
+	} else {
+		ret_val = -errno;
+		printf("compute_file_hash: %s\n", strerror(res));
+	}
+
+	return ret_val;
 }
 
 
 static void update_hash(const char* path, int attr_exists) {
-	off_t file_size = get_file_size(path);
-	printf("file size is %lu\n", file_size);
+	// off_t file_size = get_file_size(path);
+	// printf("file size is %lu\n", file_size);
 
-	size_t hash = get_file_hash(path);
-	printf("hash is %lu\n", hash);
+	unsigned char hash[SHA_DIGEST_LENGTH];
+	compute_file_hash(path, hash);
+	print_hash("updating", hash);
+	// printf("hash is %lu\n", hash);
 
 	int flags = 0;//attr_exists ? XATTR_REPLACE : XATTR_CREATE;
-	int n = setxattr(path, "HASH_ATTR_NAME", &hash, sizeof(size_t), flags);
+	int n = setxattr(path, HASH_ATTR_NAME, &hash, sizeof(char) * SHA_DIGEST_LENGTH, flags);
 	if(n < 0) printf("setxattr: %s\n", strerror(errno));
-
 }
-//--------------------------------------------------------------------
+
 
 
 
@@ -342,7 +398,8 @@ static int open_handler (int client_sfd, char args[]) {
 
     int fd;
     int status = 0;
-    int file_intact = check_hash(fpath);
+    int file_intact = check_hash(fpath);    
+    printf("file_intact=%d\n", file_intact);
     fd = open(fpath, flags);
 	if (fd == -1) {
 		printf("open returned -1 %s\n", strerror(errno));
@@ -350,11 +407,12 @@ static int open_handler (int client_sfd, char args[]) {
 	}
 	printf("status is %d,fd is %d\n", status, fd);
 
-	char response[2*sizeof(int)];
+	char response[3*sizeof(int)];
 	memcpy(response, &status, sizeof(int));
 	memcpy(response + sizeof(int), &fd, sizeof(int));
+	memcpy(response + 2*sizeof(int), &file_intact, sizeof(int));
 
-	if(write(client_sfd, response, 2 * sizeof(int)) <= 0) {
+	if(write(client_sfd, response, 3 * sizeof(int)) <= 0) {
 		printf("Couldn't send response %s\n", strerror(errno));
 	}
 	return -status;
@@ -514,6 +572,7 @@ static int utimens_handler (int client_sfd, char args[]) {
 	res = utimes(fpath, tv);
 	if (res == -1){
 		res = -errno;
+		printf("%s\n", strerror(errno));
 	}
 	printf("result is %d\n", res);
 	if(write(client_sfd, &res, sizeof(int))<= 0) {
