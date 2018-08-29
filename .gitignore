@@ -62,3 +62,5 @@ test_config.txt
 
 net_raid_server
 net_raid_client
+test.c
+test

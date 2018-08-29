@@ -8,6 +8,8 @@
 #include <string.h>
 #include <stdio.h>
 #include <assert.h>
+#include <openssl/sha.h>
+
 
 #include "log.h"
 #include "../utils/communication_structs.h"
@@ -83,66 +85,57 @@ static char* fill_in_basic_info (int args_length, const char* syscall, const cha
 	return buf;
 }
 
-static int write_to_server(int index, const char* msg, int size, char* resp, int expected_size, int* actual_size) {
-	write_results[i] = -1;
-	read_results[i] = -1;
+static int write_to_server(int index, const char* msg, int size) {
+	write_results[index] = -1;
+	read_results[index] = -1;
 	//Might move to function read_from_server()
 	// time_t start = time(NULL);	
 	// do {
-		write_results[i] = write(server_sfds[i], msg, size);
-		printf("Server N %d, write_result = %d\n", i, write_results[i]);
+		write_results[index] = write(server_sfds[index], msg, size);
+		printf("Server N %d, write_result = %d\n", index, write_results[index]);
 		// if(write_results[i] <= 0) sleep(1);
 	// } while(write_results[i] < 0 && (difftime(time(NULL), start) <= timeout));			
 
-	if(write_results[i] <= 0) {
+	if(write_results[index] <= 0) {
 		printf("%s\n", "tavzeit dzala araa");
 		char log_text [1024];
-		sprintf(log_text, "Couldn't send data to storage %s.", raids[i].diskname);
+		sprintf(log_text, "Couldn't send data to storage %s.", raids[index].diskname);
 		log_error(log_text, errno);
 		return -1;
 	}
-		printf("expected_size=%d\n", expected_size);
+	return 0;
 }
 
+
+static int read_from_server(int i, char* resp, int expected_size, int* actual_size) {
+	// start = time(NULL);
+	// do {
+		read_results[i] = read(server_sfds[i], resp, expected_size);
+		*actual_size = read_results[i];
+		printf("Server N %d, read_result = %d\n", i, read_results[i]);
+	// 	if(read_results[i] <= 0) sleep(0.5);
+	// } while(read_results[i] <= 0 && (difftime(time(NULL), start) <= timeout));	
+
+	if(read_results[i] <= 0) {
+		printf("%s\n", "tavzeit dzala araa, ver chamevitanet");
+		char log_text [1024];
+		sprintf(log_text, "Operation not completed. Couldn't receive data from storage %s.", raids[i].diskname);
+		log_error(log_text, errno);
+		return -1;
+	}
+	return 0;
+}
 
 
 //TODO: Must create write_to_server and read_from_server functions to declutter the code
 static int communicate_with_all_servers(char* msg, int size, char* resp, int expected_size, int* actual_size) {
 	int i;
 	for(i=0; i<num_servers; i++) {
-		write_results[i] = -1;
-		read_results[i] = -1;
-		//Might move to function read_from_server()
-		// time_t start = time(NULL);	
-		// do {
-			write_results[i] = write(server_sfds[i], msg, size);
-			printf("Server N %d, write_result = %d\n", i, write_results[i]);
-			// if(write_results[i] <= 0) sleep(1);
-		// } while(write_results[i] < 0 && (difftime(time(NULL), start) <= timeout));			
-
-		if(write_results[i] <= 0) {
-			printf("%s\n", "tavzeit dzala araa");
-			char log_text [1024];
-			sprintf(log_text, "Couldn't send data to storage %s.", raids[i].diskname);
-			log_error(log_text, errno);
+		if(write_to_server(i, msg, size) < 0) {
 			return -1;
 		}
-			printf("expected_size=%d\n", expected_size);
 
-		//Might move to function write_to_server()
-		// start = time(NULL);
-		// do {
-			read_results[i] = read(server_sfds[i], resp, expected_size);
-			*actual_size = read_results[i];
-			printf("Server N %d, read_result = %d\n", i, read_results[i]);
-		// 	if(read_results[i] <= 0) sleep(0.5);
-		// } while(read_results[i] <= 0 && (difftime(time(NULL), start) <= timeout));	
-
-		if(read_results[i] <= 0) {
-			printf("%s\n", "tavzeit dzala araa, ver chamevitanet");
-			char log_text [1024];
-			sprintf(log_text, "Operation not completed. Couldn't receive data from storage %s.", raids[i].diskname);
-			log_error(log_text, errno);
+		if(read_from_server(i, resp, expected_size, actual_size) < 0) {
 			return -1;
 		}
 	}
@@ -153,7 +146,7 @@ static int communicate_with_all_servers(char* msg, int size, char* resp, int exp
 
 /*
 */
-static int communicate_with_available_server(char* msg, const int size, char* resp, const int expected_size, int* available_sfd) {
+static int communicate_with_server(char* msg, const int size, char* resp, const int expected_size, int* available_sfd) {
 	int i = 0;
 	int actual_size = -1;
 	// int bytes_read = -1;
@@ -161,7 +154,7 @@ static int communicate_with_available_server(char* msg, const int size, char* re
 	while(i < num_servers && actual_size <= 0) {
 		printf("iteration no %d Sending to server %d\n", i, server_sfds[i]);	
 		write_results[i] = -1;
-		//Might move to function read_from_server()
+		//Might move to function write_to_server()
 		// time_t start = time(NULL);	
 		// do {
 			write_results[i] = write(server_sfds[i], msg, size);
@@ -224,7 +217,7 @@ static int raid1_getattr(const char *path, struct stat *stbuf) {
 	
 	int resp_size = sizeof(int) + sizeof(struct stat);
 	char resp_raw [resp_size];
-	int bytes_read = communicate_with_available_server(msg, args_length + sizeof(int), resp_raw, resp_size, NULL);
+	int bytes_read = communicate_with_server(msg, args_length + sizeof(int), resp_raw, resp_size, NULL);
 	if(bytes_read < 0) {
 		printf("%s\n", "ver chevitanet");
 		return -1;
@@ -243,13 +236,71 @@ static int raid1_getattr(const char *path, struct stat *stbuf) {
 
 
 
-// static int check_file_hashes(const char* path) {
-// 	int i;
-// 	for(i=0; i<num_servers; i++) {
+static int hash_cmp(unsigned char h1[], unsigned char h2[]) {
+	int i;
+	for(i=0; i<SHA_DIGEST_LENGTH; i++) {
+		if(h1[i] != h2[i])
+			return 1;
+	}
+	return 0;
+}
 
-// 	}
-// 	return 0;
-// }
+
+
+static int update_hash(const char* path, int dest_server_index, int source_server_index) {
+	struct stat stbuf;
+	raid1_getattr(path, &stbuf);
+	printf("file_size %lu\n", stbuf.st_size);
+	char* buf = malloc(stbuf.st_size * sizeof(char));
+	assert(buf != NULL);
+	struct fuse_file_info fi;
+	raid1_read(path, buf, stbuf.st_size, 0, &fi);
+
+
+	//raid1_read();
+}
+
+static int check_file_hashes(const char* path, const char* msg, int msg_size, char* resp,
+												int expected_size, int* actual_size) {
+	int i;
+	unsigned char hash [SHA_DIGEST_LENGTH];
+	unsigned char** hashes = malloc(sizeof(char*) * num_servers);
+	assert(hashes != NULL);
+	int* hash_matching_statuses = malloc(sizeof(int) * num_servers);
+	assert(hash_matching_statuses != NULL);
+
+	for(i=0; i<num_servers; i++) {
+		hashes[i] = malloc(SHA_DIGEST_LENGTH);
+		assert(hashes[i] != NULL);
+
+		if(write_to_server(i, msg, msg_size) == 0) {
+			if(read_from_server(i, resp, expected_size, actual_size) == 0) {
+				// int file_intact;
+				// char curr_hash [SHA_DIGEST_LENGTH];
+				memcpy(&hash_matching_statuses[i], resp + 2*sizeof(int), sizeof(int));
+				printf("hash_matching_statuses[%d]=%d\n", i, hash_matching_statuses[i]);
+				memcpy(hashes[i], resp + 3*sizeof(int), SHA_DIGEST_LENGTH);
+			}
+		}
+	}
+
+
+	for(i=0; i<num_servers; i++) {
+		if(!hash_matching_statuses[i] || (hash_cmp(hash, hashes[i]) != 0) ) {
+			printf("Hashes did not match\n");
+			//TODO: log
+			int source_server_index = (num_servers + (i-1)%num_servers)%num_servers; 
+			while(i == source_server_index || !hash_matching_statuses[source_server_index]) {
+				source_server_index = (source_server_index+1)%num_servers;
+			}
+
+			update_hash(path, i, source_server_index);
+		}
+	}
+
+}
+
+
 
 static int raid1_open(const char *path, struct fuse_file_info *fi) {
 	printf("%s\n", "-------------------------------- OPEN");
@@ -269,11 +320,11 @@ static int raid1_open(const char *path, struct fuse_file_info *fi) {
 	printf("flags are %d\n", flags);
 	memcpy(msg + sizeof(int) + 5 + strlen(path) + 1, &flags, sizeof(int));
 
-	check_file_hashes(path);
+	// check_file_hashes(path);
 	int available_sfd, status, fd, file_intact;
 	int response_size = 3*sizeof(int);
 	char response[response_size];
-	if((available_sfd = communicate_with_available_server(msg, args_length + sizeof(int), response, response_size, NULL)) <= 0) {
+	if((available_sfd = communicate_with_server(msg, args_length + sizeof(int), response, response_size, NULL)) <= 0) {
 		printf("Couldn't send message %s\n", strerror(errno));
 	}
 
@@ -365,7 +416,8 @@ static int raid1_read(const char *path, char *buf, size_t size, off_t offset, st
 	char* response = malloc(resp_size);
 	assert(response != NULL);
 	int bytes_received;
-	if((bytes_received = communicate_with_available_server(msg, args_length + sizeof(int), response, resp_size, NULL)) <= 0) {
+
+	if((bytes_received = communicate_with_server(msg, args_length + sizeof(int), response, resp_size, NULL)) <= 0) {
 		printf("Couldn't send message %s\n", strerror(errno));
 	}
 
@@ -542,7 +594,7 @@ static int raid1_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 	int buffer_size = 2 * sizeof(int) + 8000;
 	char* buffer = malloc(buffer_size);
 	assert(buffer != NULL);
-	if((bytes_received = communicate_with_available_server(msg, args_length + sizeof(int), buffer, buffer_size, &available_sfd)) <= 0) {
+	if((bytes_received = communicate_with_server(msg, args_length + sizeof(int), buffer, buffer_size, &available_sfd)) <= 0) {
 		printf("Couldn't send message %s\n", strerror(errno));
 	}
 	printf("available_sfd = %d\n", available_sfd);
