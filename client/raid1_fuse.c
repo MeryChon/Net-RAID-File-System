@@ -527,20 +527,24 @@ static int raid1_read(const char *path, char *buf, size_t size, off_t offset, st
 
 static int raid1_write(const char *path, const char *buf, size_t size, off_t offset, struct fuse_file_info *fi) {
 	printf("%s\n", "-------------------------------- WRITE");
-	int args_length = 6 + strlen(path) + 1 + sizeof(size_t) + sizeof(off_t) + size;
+	int args_length = 6 + strlen(path) + 1 + sizeof(size_t) + sizeof(off_t) + sizeof(int) + size;
 	int bytes_written;
 
 	char* msg = fill_in_basic_info(args_length, "write;", path, &bytes_written);
 	printf("Part of the msg %s\n", msg + sizeof(int));
 
+	int flags = (specific_server_index >= 0) ? (O_WRONLY | O_CREAT | O_TRUNC) : O_WRONLY;
+
 	memcpy(msg + bytes_written, &size, sizeof(size_t));
 	memcpy(msg + bytes_written + sizeof(size_t), &offset, sizeof(off_t));
-	memcpy(msg + bytes_written + sizeof(size_t) + sizeof(off_t), buf, size);
+	memcpy(msg + bytes_written + sizeof(size_t) + sizeof(off_t), &flags, sizeof(int));
+	memcpy(msg + bytes_written + sizeof(size_t) + sizeof(off_t) + sizeof(int), buf, size);
 
 	char* response = malloc(2*sizeof(int) + size); //TODO: + size is probably not necessary
 	assert(response != NULL);
 	int bytes_received;
-	if(communicate_with_all_servers(msg, args_length + sizeof(int) + size, response, 2*sizeof(int) + size, &bytes_received) < 0) {
+	if(communicate_with_all_servers(msg, args_length + sizeof(int) + size, response, 
+													2*sizeof(int) + size, &bytes_received) < 0) {
 		printf("Oops! bytes_received = %d\n", bytes_received);
 		return -errno;
 	}

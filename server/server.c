@@ -508,7 +508,7 @@ static int write_handler (int client_sfd, char args[]) {
     // int ret_val = 0;
     int bytes_written = -1;
 
-    fd = open(fpath, O_WRONLY);
+    fd = open(fpath, O_WRONLY); // | O_CREAT | O_TRUNC 
 	if (fd == -1) {
 		res = -errno;
 		printf("open returned -1 %s\n", strerror(errno));
