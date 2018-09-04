@@ -154,6 +154,9 @@ static off_t get_file_size(const char* path) {
 
 static int compute_file_hash(const char* path, unsigned char result []) {
 	off_t file_size = get_file_size(path);
+	if(file_size < 0) {
+		return -file_size;
+	}
 
 	FILE* file = fopen(path, "r+");
 	if(fseek(file, 0, SEEK_SET) != 0) {
@@ -168,7 +171,7 @@ static int compute_file_hash(const char* path, unsigned char result []) {
 	int elems_read = fread(file_content, sizeof(char), file_size, file);
 	//add \0 ??
 	printf("elems_read = %d\n", elems_read);
-	printf("content:%s", file_content);
+	printf("content:%s\n", file_content);
 	if(elems_read != file_size) {
 		free(file_content);
 		return -errno;
@@ -216,10 +219,15 @@ static int hash_cmp(unsigned char h1[], unsigned char h2[]) {
 	return 0;
 }
 
-
-static int check_hash(const char* path) {
+/*
+ * Returns FILE_INTACT if hash attribute did not differ from file content hash;
+ * FILE_CORRUPT if these hashes differ and -errno if any of the syscalls failed 
+ */
+static int check_hash(const char* path, unsigned char* hash) {
 	int ret_val = -1;
 	off_t file_size = get_file_size(path);
+	if(file_size < 0)
+		return -file_size;
 	printf("file size is %lu\n", file_size);
 
 	unsigned char h1[SHA_DIGEST_LENGTH];
@@ -231,19 +239,20 @@ static int check_hash(const char* path) {
 		if(getxattr(path, HASH_ATTR_NAME, h2, size)  == size) {
 			print_hash("hash2", h2);
 			if(hash_cmp(h1, h2) == 0) {	
-				printf("%s\n", "Yaay");
-				ret_val = 1;
+				printf("%s\n", "Yaay Hahses match");
+				memcpy(hash, h1, SHA_DIGEST_LENGTH);
+				ret_val = FILE_INTACT;
 			} else {
-				printf("%s\n", "Noooooooo");
+				printf("%s\n", "Nooooo Hashes differ");
 				ret_val = 0;
 			}
 		} else {
 			ret_val = -errno;
-			printf("getxattr: %s\n", strerror(errno));
+			printf("getxattr: errno %d --> %s\n",errno, strerror(errno));
 		}
 	} else {
-		ret_val = -errno;
-		printf("compute_file_hash: %s\n", strerror(res));
+		ret_val = -res;
+		printf("compute_file_hash: errno %d --> %s\n", res, strerror(res));
 	}
 
 	return ret_val;
@@ -398,8 +407,10 @@ static int open_handler (int client_sfd, char args[]) {
 
     int fd;
     int status = 0;
-    int file_intact = check_hash(fpath);    
-    printf("file_intact=%d\n", file_intact);
+    unsigned char hash [SHA_DIGEST_LENGTH];
+    int file_intact = check_hash(fpath, hash);
+    printf("file_intact = %d\n", file_intact);
+    print_hash("Sending hash ", hash);   
     fd = open(fpath, flags);
 	if (fd == -1) {
 		printf("open returned -1 %s\n", strerror(errno));
@@ -407,12 +418,14 @@ static int open_handler (int client_sfd, char args[]) {
 	}
 	printf("status is %d,fd is %d\n", status, fd);
 
-	char response[3*sizeof(int)];
+	int response_size = 3*sizeof(int) + SHA_DIGEST_LENGTH;
+	char response[response_size];
 	memcpy(response, &status, sizeof(int));
 	memcpy(response + sizeof(int), &fd, sizeof(int));
 	memcpy(response + 2*sizeof(int), &file_intact, sizeof(int));
+	memcpy(response + 3*sizeof(int), hash, SHA_DIGEST_LENGTH);
 
-	if(write(client_sfd, response, 3 * sizeof(int)) <= 0) {
+	if(write(client_sfd, response, response_size) <= 0) {
 		printf("Couldn't send response %s\n", strerror(errno));
 	}
 	return -status;
@@ -463,6 +476,7 @@ static int read_handler (int client_sfd, char args[]) {
 	memcpy(response, &res, sizeof(int));
 	memcpy(response + sizeof(int), &bytes_read, sizeof(int));
 	memcpy(response+2*sizeof(int), buf, size);
+	printf("content:%s\n", buf);
 	if(write(client_sfd, response, 2*sizeof(int) + size) <= 0) {
 		printf("Couldn't send response %s\n", strerror(errno));
 	}
