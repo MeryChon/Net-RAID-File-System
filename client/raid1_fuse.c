@@ -106,7 +106,8 @@ static int write_to_server(int index, const char* msg, int size) {
 		printf("%s\n", "tavzeit dzala araa");
 		char log_text [1024];
 		sprintf(log_text, "Couldn't send data to storage %s.", raids[index].diskname);
-		log_error(log_text, errno);
+		// log_error(log_text, errno);
+		log_server_error(0, index, errno, "");
 		return -1;
 	}
 	return 0;
@@ -126,7 +127,8 @@ static int read_from_server(int i, char* resp, int expected_size, int* actual_si
 		printf("%s\n", "tavzeit dzala araa, ver chamevitanet");
 		char log_text [1024];
 		sprintf(log_text, "Operation not completed. Couldn't receive data from storage %s.", raids[i].diskname);
-		log_error(log_text, errno);
+		// log_error(log_text, errno);
+		log_server_error(0, i, errno, "");
 		return -1;
 	}
 	return 0;
@@ -141,21 +143,17 @@ static int read_from_server(int i, char* resp, int expected_size, int* actual_si
 static int communicate_with_server(int server_index, char* msg, const int size, char* resp, 
 													const int expected_size, int* actual_size) {
 	if(write_to_server(server_index, msg, size) < 0) {
-		//TODO: log
 		return -1;
 	}
 
 	if(read_from_server(server_index, resp, expected_size, actual_size) < 0) {
-		//TODO: log
 		return -1;
 	}
 
-	//TODO: log
 	return 0;
 }
 
 
-//TODO: Must create write_to_server and read_from_server functions to declutter the code
 static int communicate_with_all_servers(char* msg, int size, char* resp, int expected_size, int* actual_size) {
 	int i;
 	if(specific_server_index >= 0) {
@@ -285,7 +283,9 @@ static int update_file(const char* path, int dest_server_index, off_t buffer_siz
 		return WRITE_FAILED;
 	}
 
-	//TODO : log("file updated successfully")
+	char text [MAX_PATH_LENGTH + 64];
+	sprintf(text, "%s %s", path, "File updated successfully");
+	log_server_error(0, dest_server_index, 0, text);
 	return HASH_UPDATE_SUCCESS;
 }
 
@@ -347,13 +347,16 @@ static int check_file_hashes(const char* path, const char* msg, int msg_size, ch
 	for(i=0; i<NUM_SERVERS; i++) {
 		if(hash_matching_statuses[i] != FILE_INTACT) {
 			printf("File corrupted on server %d\n", i);
-			//TODO: log
+			char err_str[MAX_PATH_LENGTH + 64];
+			sprintf(err_str, "%s - %s", path, "File corrupt");
+			log_server_error(0, i, 0, err_str);
 			specific_server_index = (i == 0) ? 1 : 0;//(num_servers + (i-1)%num_servers)%num_servers; 
 			printf("current server index %d, source server index %d\n", i, specific_server_index);
 			if(hash_matching_statuses[specific_server_index] != FILE_INTACT) {
 				printf("hash_matching_statuses[%d]=%d\n", specific_server_index, hash_matching_statuses[specific_server_index]);
 				printf("server %d was corrupt too\n", i);
-				//TODO: log
+				sprintf(err_str, "%s - %s", path, "File corrupt. Unable to repaire file");
+				log_server_error(0, specific_server_index, 0, err_str);
 				return -1;
 			} else {
 				struct stat stbuf;
@@ -404,6 +407,7 @@ static int raid1_open(const char *path, struct fuse_file_info *fi) {
 	printf("check_hashes_res=%d; actual_size=%d\n", check_hashes_res, actual_size);
 	if(check_hashes_res < 0) {
 		//TODO: log
+		return -1;
 	}
 	int status, fd, file_intact;
 	// int response_size = 3*sizeof(int);
@@ -528,23 +532,25 @@ static int raid1_read(const char *path, char *buf, size_t size, off_t offset, st
 static int raid1_write(const char *path, const char *buf, size_t size, off_t offset, struct fuse_file_info *fi) {
 	printf("%s\n", "-------------------------------- WRITE");
 	int args_length = 6 + strlen(path) + 1 + sizeof(size_t) + sizeof(off_t) + sizeof(int) + size;
-	int bytes_written;
+	int bytes_written, flags;
 
 	char* msg = fill_in_basic_info(args_length, "write;", path, &bytes_written);
 	printf("Part of the msg %s\n", msg + sizeof(int));
 
-	int flags = (specific_server_index >= 0) ? (O_WRONLY | O_CREAT | O_TRUNC) : O_WRONLY;
+	flags = (specific_server_index >= 0) ? (O_WRONLY | O_CREAT | O_TRUNC) : (O_WRONLY);
+	printf("flags=%d\n", flags);
 
 	memcpy(msg + bytes_written, &size, sizeof(size_t));
 	memcpy(msg + bytes_written + sizeof(size_t), &offset, sizeof(off_t));
 	memcpy(msg + bytes_written + sizeof(size_t) + sizeof(off_t), &flags, sizeof(int));
 	memcpy(msg + bytes_written + sizeof(size_t) + sizeof(off_t) + sizeof(int), buf, size);
 
-	char* response = malloc(2*sizeof(int) + size); //TODO: + size is probably not necessary
+	char* response = malloc(2*sizeof(int));
 	assert(response != NULL);
+
 	int bytes_received;
-	if(communicate_with_all_servers(msg, args_length + sizeof(int) + size, response, 
-													2*sizeof(int) + size, &bytes_received) < 0) {
+	if(communicate_with_all_servers(msg, args_length+sizeof(int)+size, response, 
+															2*sizeof(int), &bytes_received) < 0) {
 		printf("Oops! bytes_received = %d\n", bytes_received);
 		return -errno;
 	}

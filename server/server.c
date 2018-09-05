@@ -495,20 +495,22 @@ static int write_handler (int client_sfd, char args[]) {
 
     size_t size;
     off_t offset;
+    int flags;
 
     memcpy(&size, args + path_length + 1, sizeof(size_t));
     memcpy(&offset, args + path_length + 1 + sizeof(size_t), sizeof(off_t));
-    printf("size is %lu, offset is %lu\n", size, offset);
+    memcpy(&flags, args + path_length + 1 + sizeof(size_t) + sizeof(off_t), sizeof(int));
+    printf("size is %lu, offset is %lu, flags is %d\n", size, offset, flags);
 
     char* buf = malloc(size);
     assert(buf != NULL);
-    memcpy(buf, args+path_length+1+sizeof(size_t)+sizeof(off_t), size);
+    memcpy(buf, args+path_length+1+sizeof(size_t)+sizeof(off_t)+sizeof(int), size);
 
     int fd, res;
     // int ret_val = 0;
     int bytes_written = -1;
 
-    fd = open(fpath, O_WRONLY); // | O_CREAT | O_TRUNC 
+    fd = open(fpath, flags);
 	if (fd == -1) {
 		res = -errno;
 		printf("open returned -1 %s\n", strerror(errno));

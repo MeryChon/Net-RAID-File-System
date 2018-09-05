@@ -4,6 +4,7 @@
 #include <time.h>
 #include <assert.h>
 #include <stdlib.h>
+#include "structs.h"
 
 
 void set_log_file(char* file_path) {
@@ -59,4 +60,25 @@ int log_error(char* error_msg, int error_num) {
 		}
 	}	
 	return 0;
+}
+
+void log_server_error(int disk_index, int server_index, int error_num, char* additional_message) {
+	FILE* log_file = fopen(log_file_path, "a");
+	if(log_file) {
+		time_t t = time(0);
+		struct tm* tm = localtime(&t);
+		char time_string [26];
+		char* str_error = malloc(600);
+		assert(str_error != NULL);
+		if(error_num != 0) {
+			strcpy(str_error, strerror(error_num));
+		} else {
+			strcpy(str_error, "");
+		}
+		strftime(time_string, 26, "%Y-%m-%d %H:%M:%S", tm);
+		fprintf(log_file, "[%s]--- %s %s  %s %s \n", time_string, raids[disk_index].diskname, 
+						raids[disk_index].servers[server_index], additional_message, strerror(error_num));
+		fclose(log_file);
+		free (str_error);
+	}
 }
